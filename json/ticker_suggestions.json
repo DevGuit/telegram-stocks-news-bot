@@ -1,0 +1,17 @@
+{
+  "SP500": ["SPY", "VOO", "IVV"],
+  "S&P500": ["SPY", "VOO", "IVV"],
+  "S&P": ["SPY"],
+  "NASDAQ": ["QQQ", "ONEQ"],
+  "DOWJONES": ["DIA"],
+  "DOWINDEX": ["DIA"],
+  "RUSSELL": ["IWM", "IWV"],
+  "RUSSELL2000": ["IWM"],
+  "VIX": ["VIXY", "UVXY"],
+  "SILVER": ["SLV"],
+  "OIL": ["USO", "XLE"],
+  "BITCOIN": ["BITO", "GBTC"],
+  "BTC": ["BITO", "GBTC"],
+  "ETHEREUM": ["ETHE"],
+  "ETH": ["ETHE"]
+}
