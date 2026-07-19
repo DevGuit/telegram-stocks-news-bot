@@ -31,22 +31,42 @@ uv run python main.py
 
 ### 1. Create Telegram Bot
 
-1. Message [@BotFather](https://t.me/BotFather) → `/newbot`
-2. Copy your bot token
+1. Open Telegram and message [@BotFather](https://t.me/BotFather)
+2. Send `/newbot` and follow the prompts to create your bot
+3. Copy the bot token (looks like `1234567890:ABCdefGHIjklMNOpqrsTUVwxyz`)
 
-### 2. Get Chat ID
+### 2. Get Your Chat ID
 
-1. Message your bot
-2. Visit: `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates`
-3. Find `"chat":{"id":123456789}`
+1. Start a conversation with your bot (send any message)
+2. Visit this URL in your browser (replace `<YOUR_TOKEN>` with your bot token):
+   ```
+   https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates
+   ```
+3. Look for `"chat":{"id":123456789}` in the response
+4. Copy the number after `"id":` (e.g., `123456789`)
 
-### 3. Configure
+### 3. Configure Environment Variables
 
-Create `.env` file:
-```env
-TELEGRAM_BOT_TOKEN=your_bot_token_here
-TELEGRAM_CHAT_ID=your_chat_id_here
-```
+1. Copy the example file:
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Edit `.env` with your credentials:
+   ```bash
+   # Open .env in your text editor
+   nano .env  # or vim, code, etc.
+   ```
+
+3. Replace the placeholder values:
+   ```env
+   TELEGRAM_BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrsTUVwxyz
+   TELEGRAM_CHAT_ID=123456789
+   ```
+
+   **Important**: Use your actual bot token and chat ID, not the examples above.
+
+### 4. Configure Portfolio (Optional)
 
 Edit `json/portfolio.json` with your stocks:
 ```json
