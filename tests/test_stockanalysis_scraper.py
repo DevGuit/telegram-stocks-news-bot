@@ -15,15 +15,26 @@ def scraper():
 
 @pytest.fixture
 def mock_html():
-    """Mock StockAnalysis HTML response."""
+    """Mock StockAnalysis HTML response with new structure."""
     return """
     <html>
         <body>
-            <div id="news">
-                <a href="/news/article1">Microsoft announces new AI features</a>
-                <time datetime="2024-01-19T10:30:00Z"></time>
-                <a href="https://stockanalysis.com/news/article2">Tech stock rallies</a>
-                <time datetime="2024-01-19T09:15:00Z"></time>
+            <div>
+                <h2>News</h2>
+                <div>
+                    <div class="flex">
+                        <h3>
+                            <a href="https://www.tipranks.com/news/microsoft-announces-new-ai-features">Microsoft announces new AI features</a>
+                        </h3>
+                        <div class="mt-1 text-sm text-faded sm:order-1 sm:mt-0">1 hour ago - TipRanks</div>
+                    </div>
+                    <div class="flex">
+                        <h3>
+                            <a href="https://www.invezz.com/news/tech-stock-rallies">Tech stock rallies</a>
+                        </h3>
+                        <div class="mt-1 text-sm text-faded sm:order-1 sm:mt-0">2 hours ago - Invezz</div>
+                    </div>
+                </div>
             </div>
         </body>
     </html>
@@ -52,7 +63,7 @@ def test_fetch_news_success(mock_get, scraper, mock_html):
     assert all(isinstance(item, NewsItem) for item in news)
     assert news[0].ticker == "MSFT"
     assert "Microsoft" in news[0].headline
-    assert news[0].source == "StockAnalysis"
+    assert news[0].source == "Tipranks"  # Source extracted from URL domain
 
 
 @patch("resources.stockanalysis_scraper.requests.get")
@@ -124,13 +135,28 @@ def test_fetch_multiple_tickers_with_failure(mock_get, scraper):
 
 @patch("resources.stockanalysis_scraper.requests.get")
 def test_fetch_news_url_formatting(mock_get, scraper):
-    """Test URL formatting for relative and absolute paths."""
+    """Test URL formatting for external news links."""
     mock_html = """
     <html>
-        <div id="news">
-            <a href="/news/relative">Relative URL</a>
-            <a href="https://stockanalysis.com/news/absolute">Absolute URL</a>
-        </div>
+        <body>
+            <div>
+                <h2>News</h2>
+                <div>
+                    <div class="flex">
+                        <h3>
+                            <a href="https://www.tipranks.com/news/article1">News from TipRanks</a>
+                        </h3>
+                        <div class="mt-1 text-sm text-faded">1 hour ago - TipRanks</div>
+                    </div>
+                    <div class="flex">
+                        <h3>
+                            <a href="https://www.invezz.com/news/article2">News from Invezz</a>
+                        </h3>
+                        <div class="mt-1 text-sm text-faded">2 hours ago - Invezz</div>
+                    </div>
+                </div>
+            </div>
+        </body>
     </html>
     """
     mock_response = MagicMock()
@@ -141,8 +167,10 @@ def test_fetch_news_url_formatting(mock_get, scraper):
     news = scraper.fetch_news("MSFT")
 
     assert len(news) == 2
-    assert news[0].url.startswith("https://stockanalysis.com")
-    assert news[1].url.startswith("https://stockanalysis.com")
+    assert news[0].url.startswith("https://")
+    assert news[1].url.startswith("https://")
+    assert "tipranks.com" in news[0].url or "invezz.com" in news[0].url
+    assert "tipranks.com" in news[1].url or "invezz.com" in news[1].url
 
 
 @patch("resources.stockanalysis_scraper.requests.get")

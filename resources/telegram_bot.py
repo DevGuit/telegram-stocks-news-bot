@@ -537,7 +537,15 @@ class StockNewsBot:
             await update.message.reply_text(msg)
             return
 
-        msg += f"✅ Monitoring {total} tickers:\n\n"
+        msg += f"✅ Monitoring {total} tickers\n\n"
+
+        # Show polling status
+        if self.polling_enabled:
+            msg += "🟢 Automatic polling: RUNNING\n"
+            msg += "   (Checking for news every 30 seconds)\n\n"
+        else:
+            msg += "⚪ Automatic polling: STOPPED\n"
+            msg += "   Use /run to start automatic updates\n\n"
 
         # Show stocks with links
         if portfolio.get("stocks"):
@@ -554,6 +562,10 @@ class StockNewsBot:
             msg += "\n"
 
         msg += "💡 Quick Actions:\n"
+        if not self.polling_enabled:
+            msg += "  • /run - Start automatic polling\n"
+        else:
+            msg += "  • /stop - Stop automatic polling\n"
         msg += "  • /news - Get latest news now\n"
         msg += "  • /list - View portfolio with validation\n"
         msg += "  • /help - Show all commands"

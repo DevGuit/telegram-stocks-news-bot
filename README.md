@@ -4,13 +4,13 @@ A Telegram bot that monitors stock news, analyzes sentiment with AI, and sends y
 
 ## Features
 
-- Manage portfolio via Telegram chat (stocks and ETFs)
-- Auto-scrapes StockAnalysis news (no API key)
-- AI sentiment analysis (FinBERT)
-- Smart ticker validation with suggestions
-- Portfolio validation on startup (shows valid/invalid tickers)
-- On-demand updates with `/status`
-- Secure credential management
+- **Portfolio Management**: Add/remove stocks and ETFs via Telegram chat
+- **News Monitoring**: Manual (`/news`) or automatic (`/run`) news updates
+- **AI Sentiment Analysis**: FinBERT analyzes news sentiment (positive/negative/neutral)
+- **Smart Validation**: Validates tickers against StockAnalysis.com before adding
+- **Multiple Sources**: Aggregates news from TipRanks, Invezz, and other financial sources
+- **User Control**: Start/stop automatic polling with `/run` and `/stop` commands
+- **Secure**: Credentials stored in `.env` file (never committed to git)
 
 ## Quick Start
 
@@ -73,10 +73,11 @@ Edit `json/portfolio.json` with your stocks and ETFs:
 ```json
 {
   "stocks": ["AAPL", "MSFT", "GOOGL"],
-  "etf": ["INQQ", "SGLD"],
-  "last_check": null
+  "etf": ["INQQ"]
 }
 ```
+
+**Tip**: You can also manage your portfolio entirely via Telegram commands (`/addstock`, `/addetf`, `/remove`)
 
 Edit `json/telegram_config.json` to adjust check intervals:
 ```json
@@ -91,48 +92,86 @@ Edit `json/telegram_config.json` to adjust check intervals:
 
 ## Commands
 
-- `/start` - Initialize bot
-- `/list` - View portfolio (stocks and ETFs shown separately)
-- `/addstock TICKER` - Add stock (auto-validates against StockAnalysis)
-- `/addetf TICKER` - Add ETF (auto-validates against StockAnalysis)
-- `/remove TICKER` - Remove stock or ETF
-- `/remove_all` - Remove all invalid tickers at once
-- `/status` - Get news now
-- `/help` - Show help
+### Portfolio Management
+- `/status` - Show portfolio with StockAnalysis links
+- `/list` - View portfolio (validates all tickers and shows valid/invalid)
+- `/addstock TICKER` - Add stock (e.g., `/addstock NVDA`)
+- `/addetf TICKER` - Add ETF (e.g., `/addetf INQQ`)
+- `/remove TICKER` - Remove ticker from portfolio
+- `/remove_all` - Remove all tickers
+- `/remove_invalid` - Remove all invalid tickers automatically
 
-**Tip**: Invalid tickers will suggest valid alternatives from ticker suggestions file
+### News Monitoring
+- `/news` - Fetch latest news now (manual, on-demand)
+- `/run` - Start automatic news polling (checks every 30 seconds)
+- `/stop` - Stop automatic news polling
+
+### Help
+- `/start` - Show welcome message with quick start guide
+- `/help` - Show all commands with descriptions
 
 ## How It Works
 
-1. Validates all tickers in portfolio at startup (sends summary to Telegram)
-2. Scrapes StockAnalysis.com for latest stock and ETF news
-3. FinBERT analyzes headline sentiment
-4. Filters relevant news (positive/negative ≥50% confidence)
-5. Sends formatted updates to Telegram
+1. **Startup**: Bot validates all tickers in portfolio and sends welcome message
+2. **Manual Mode**: Use `/news` to fetch latest news on demand
+3. **Automatic Mode**: Use `/run` to enable automatic news updates every 30 seconds
+4. **News Fetching**: Scrapes StockAnalysis.com which aggregates news from multiple sources (TipRanks, Invezz, etc.)
+5. **Sentiment Analysis**: FinBERT analyzes each headline for sentiment (positive/negative/neutral)
+6. **Filtering**: Only shows news with strong sentiment (≥50% confidence, non-neutral)
+7. **Deduplication**: Tracks sent headlines to avoid duplicate notifications
+8. **Date Filter**: Only shows news from today (in your timezone)
+
+## Usage Workflow
+
+1. **Start the bot**: `uv run python main.py`
+2. **Check welcome message**: Bot sends portfolio summary to Telegram
+3. **Manage portfolio**: Use `/addstock` or `/addetf` to add tickers
+4. **Get news manually**: Use `/news` to fetch latest news on demand
+5. **Enable automatic updates**: Use `/run` to start automatic polling
+6. **Stop when done**: Use `/stop` to disable automatic polling
 
 ## Troubleshooting
 
 **Bot not responding?**
-- Check `.env` has correct token and chat ID
-- Send `/start` to initialize
-- Verify bot is running
+- Check `.env` has correct `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`
+- Send `/start` to see if bot is connected
+- Verify bot is running with `uv run python main.py`
 
-**No news?**
-- Use `/status` for immediate check
-- Tickers are validated when added
-- Only significant sentiment is reported
+**No news appearing?**
+- Use `/news` to manually fetch news (automatic polling is OFF by default)
+- Use `/run` to enable automatic news polling
+- Check if tickers are valid with `/list` command
+- Note: Only news from today with strong sentiment (≥50% confidence) is shown
+- Neutral sentiment news is filtered out to reduce noise
 
-**High memory?**
-- FinBERT model uses ~1GB RAM (normal)
+**Invalid ticker errors?**
+- Use `/list` to see which tickers are invalid
+- Use `/remove_invalid` to remove all invalid tickers at once
+- Tickers are validated against StockAnalysis.com when added
+
+**High memory usage?**
+- FinBERT model uses ~1GB RAM (this is normal for AI models)
+- Model is cached in `data/models/` after first download
 
 ## Technical Stack
 
-- **StockAnalysis**: HTML scraping (BeautifulSoup)
-- **FinBERT**: Pre-trained financial sentiment model
-- **Telegram**: python-telegram-bot (async)
-- **Architecture**: Async Python with asyncio
+- **News Source**: StockAnalysis.com (scrapes news from TipRanks, Invezz, and other sources)
+- **Scraping**: BeautifulSoup4 for HTML parsing
+- **Sentiment Analysis**: FinBERT (ProsusAI/finbert) - pre-trained financial sentiment model
+- **Bot Framework**: python-telegram-bot (async version)
+- **Architecture**: Async Python with asyncio for concurrent news fetching
+- **Package Manager**: uv for fast, reliable dependency management
 
-See [DOCUMENTATION.md](DOCUMENTATION.md) for technical details.
+See [DOCUMENTATION.md](DOCUMENTATION.md) for detailed technical documentation.
+
+## Recent Updates
+
+- Fixed StockAnalysis scraper (adapted to new HTML structure)
+- Added `/run` and `/stop` commands for controlling automatic news polling
+- Changed startup behavior to send welcome message only (no automatic news fetching)
+- Removed hardcoded ticker suggestions (simplified validation errors)
+- Improved news source attribution (shows actual source: TipRanks, Invezz, etc.)
+- Added deduplication to prevent sending the same news twice
 
 ## License
 

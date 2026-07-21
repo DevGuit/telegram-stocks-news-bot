@@ -4,8 +4,9 @@ Data flow:
   Stock ticker → HTTP request → StockAnalysis HTML → BeautifulSoup parsing → News list
 """
 
+import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import requests
 from bs4 import BeautifulSoup
@@ -114,20 +115,21 @@ class StockAnalysisScraper:
                 else:
                     url_full = url_path
 
-                # Try to find timestamp
+                # Try to find timestamp from relative time text
                 timestamp = datetime.now()  # Default to now
                 parent = link.find_parent()
-                if parent:
-                    time_tag = parent.find("time")
-                    if time_tag:
-                        datetime_attr = time_tag.get("datetime")
-                        if datetime_attr:
-                            try:
-                                timestamp = datetime.fromisoformat(
-                                    datetime_attr.replace("Z", "+00:00")
-                                )
-                            except Exception:
-                                pass
+                if parent and parent.name == "h3":
+                    # Get the flex container (parent of h3)
+                    flex_container = parent.parent
+                    if flex_container:
+                        # Look for div with timestamp text (contains "ago")
+                        time_div = flex_container.find(
+                            "div", class_=lambda c: c and "text-faded" in c
+                        )
+                        if time_div:
+                            time_text = time_div.get_text(strip=True)
+                            # Parse relative time like "1 hour ago - TipRanks"
+                            timestamp = self._parse_relative_time(time_text)
 
                 # Extract source from URL domain
                 source = "StockAnalysis"
@@ -156,6 +158,51 @@ class StockAnalysisScraper:
                 continue
 
         return news_items
+
+    def _parse_relative_time(self, time_text: str) -> datetime:
+        """Parse relative time string like '1 hour ago' or '3 minutes ago' into datetime.
+
+        Args:
+            time_text: Text like "1 hour ago - TipRanks" or "3 minutes ago - Invezz"
+
+        Returns:
+            datetime object representing the time (in UTC).
+        """
+        # Default to now if parsing fails
+        now = datetime.now()
+
+        # Extract just the time part (before the dash if present)
+        if " - " in time_text:
+            time_part = time_text.split(" - ")[0].strip()
+        else:
+            time_part = time_text.strip()
+
+        # Parse patterns like "1 hour ago", "3 minutes ago", "2 days ago"
+        pattern = r"(\d+)\s*(second|minute|hour|day|week|month)s?\s*ago"
+        match = re.search(pattern, time_part, re.IGNORECASE)
+
+        if not match:
+            return now
+
+        amount = int(match.group(1))
+        unit = match.group(2).lower()
+
+        # Calculate the datetime
+        if unit == "second":
+            return now - timedelta(seconds=amount)
+        elif unit == "minute":
+            return now - timedelta(minutes=amount)
+        elif unit == "hour":
+            return now - timedelta(hours=amount)
+        elif unit == "day":
+            return now - timedelta(days=amount)
+        elif unit == "week":
+            return now - timedelta(weeks=amount)
+        elif unit == "month":
+            # Approximate: 30 days per month
+            return now - timedelta(days=amount * 30)
+
+        return now
 
     def fetch_multiple_tickers(
         self,

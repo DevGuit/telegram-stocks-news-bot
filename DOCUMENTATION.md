@@ -86,12 +86,22 @@ Portfolio Updates (add/remove stocks and ETFs via chat commands)
     - `asset_type`: "stocks" or "etf" (default: "stocks")
   - `fetch_multiple_tickers(tickers, max_news_per_ticker)`: Batch scraping
     - Accepts dict: `{"stocks": [...], "etf": [...]}` or list (assumes stocks)
+  - `_parse_relative_time(time_text)`: Convert relative timestamps ("1 hour ago") to datetime
 - **Data Class**: `NewsItem` - timestamp, headline, source, url, ticker
 - **URL Patterns**:
   - Stocks: `https://stockanalysis.com/stocks/{ticker}/` (lowercase ticker)
   - ETFs: `https://stockanalysis.com/etf/{ticker}/` (lowercase ticker)
-- **HTML Parsing**: Looks for `<div id="news">` or `<section class="news">`
-- **Dependencies**: `requests` for HTTP, `beautifulsoup4` for HTML parsing
+- **HTML Parsing**:
+  - Finds H2 heading with "News" text
+  - Searches parent containers for external news links (href contains "/news/" and starts with "http")
+  - News aggregated from TipRanks, Invezz, and other financial sources
+- **Timestamp Extraction**:
+  - Parses relative time strings: "1 hour ago - TipRanks", "3 minutes ago - Invezz"
+  - Supports seconds, minutes, hours, days, weeks, months
+  - Converts to absolute datetime objects for filtering and display
+  - Located in div with class "text-faded" near news headline
+- **Source Attribution**: Extracts actual source (TipRanks, Invezz) from URL domain
+- **Dependencies**: `requests` for HTTP, `beautifulsoup4` for HTML parsing, `re` for timestamp parsing
 - **Runnable**: Contains `if __name__ == "__main__":` example with both stocks and ETFs
 
 ### resources/sentiment_classifier.py
