@@ -47,7 +47,7 @@ def test_classifier_with_cache_dir():
             "resources.sentiment_classifier.AutoModelForSequenceClassification"
         ) as mock_model,
     ):
-        classifier = SentimentClassifier(model_cache_dir=cache_dir)
+        SentimentClassifier(model_cache_dir=cache_dir)
 
         mock_tokenizer.from_pretrained.assert_called_with(
             "ProsusAI/finbert", cache_dir=str(cache_dir)

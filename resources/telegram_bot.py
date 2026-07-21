@@ -21,6 +21,7 @@ from telegram.ext import (
 
 from .finviz_scraper import FinvizScraper, NewsItem
 from .sentiment_classifier import SentimentClassifier, SentimentResult
+from .stockanalysis_scraper import StockAnalysisScraper
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +182,7 @@ class StockNewsBot:
         await update.message.reply_text(f"✅ Removed {ticker} from your portfolio.")
 
     async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /status command - fetch latest news immediately."""
+        """Handle /status command - fetch latest news immediately (today only)."""
         stocks = self._load_portfolio()
 
         if not stocks:
@@ -191,18 +192,67 @@ class StockNewsBot:
             return
 
         await update.message.reply_text(
-            f"🔍 Fetching latest news for {len(stocks)} stocks...\nThis may take a moment."
+            f"🔍 Fetching today's news for {len(stocks)} stocks...\nThis may take a moment."
         )
 
         try:
-            scraper = FinvizScraper()
+            # Import here to avoid circular imports
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            import os
+
+            # Initialize scrapers
+            finviz_scraper = FinvizScraper()
+            stockanalysis_scraper = StockAnalysisScraper()
             classifier = SentimentClassifier(model_cache_dir=self.model_cache_dir)
 
-            all_news = scraper.fetch_multiple_tickers(stocks, max_news_per_ticker=5)
+            # Fetch from all sources
+            all_news = {}
+
+            # Fetch from Finviz
+            try:
+                finviz_news = finviz_scraper.fetch_multiple_tickers(
+                    stocks, max_news_per_ticker=5
+                )
+                for ticker, news_items in finviz_news.items():
+                    if ticker not in all_news:
+                        all_news[ticker] = []
+                    all_news[ticker].extend(news_items)
+            except Exception as e:
+                logger.warning(f"Failed to fetch from Finviz: {e}")
+
+            # Fetch from StockAnalysis
+            try:
+                sa_news = stockanalysis_scraper.fetch_multiple_tickers(
+                    stocks, max_news_per_ticker=5
+                )
+                for ticker, news_items in sa_news.items():
+                    if ticker not in all_news:
+                        all_news[ticker] = []
+                    all_news[ticker].extend(news_items)
+            except Exception as e:
+                logger.warning(f"Failed to fetch from StockAnalysis: {e}")
+
+            # Get user timezone and today's date
+            timezone_str = os.getenv("USER_TIMEZONE", "Europe/Paris")
+            user_tz = ZoneInfo(timezone_str)
+            today = datetime.now(user_tz).date()
 
             classified_news = []
+            seen_headlines = set()
+
             for ticker, news_items in all_news.items():
                 for news in news_items:
+                    # Convert to user timezone and check if today
+                    news_date = news.timestamp.astimezone(user_tz).date()
+                    if news_date != today:
+                        continue
+
+                    # Skip duplicates
+                    if news.headline in seen_headlines:
+                        continue
+                    seen_headlines.add(news.headline)
+
                     sentiment = classifier.classify(news.headline)
 
                     if sentiment.label != "neutral" and sentiment.score >= 0.5:
@@ -214,11 +264,11 @@ class StockNewsBot:
                 chat_id = str(update.effective_chat.id)
                 await self.send_news_update(chat_id, classified_news)
                 await update.message.reply_text(
-                    f"✅ Found {len(classified_news)} relevant news items!"
+                    f"✅ Found {len(classified_news)} relevant news items from today!"
                 )
             else:
                 await update.message.reply_text(
-                    "ℹ️ No significant news found at the moment.\n"
+                    f"ℹ️ No significant news found for today ({today}).\n"
                     "Only showing news with strong positive or negative sentiment."
                 )
 

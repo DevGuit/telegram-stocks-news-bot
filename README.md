@@ -1,4 +1,4 @@
-# Stock News Monitor 📈
+# Stock News Monitor
 
 A Telegram bot that monitors stock news, analyzes sentiment with AI, and sends you real-time alerts.
 
@@ -15,7 +15,7 @@ A Telegram bot that monitors stock news, analyzes sentiment with AI, and sends y
 
 ```bash
 # 1. Install
-git clone <your-repo>
+git clone https://github.com/DevGuit/Portfolio_Telegram_Bot.git
 cd stock-news-monitor
 uv sync
 
@@ -66,16 +66,26 @@ uv run python main.py
 
    **Important**: Use your actual bot token and chat ID, not the examples above.
 
-### 4. Configure Portfolio (Optional)
+### 4. Configure Portfolio and Settings
 
 Edit `json/portfolio.json` with your stocks:
 ```json
 {
   "stocks": ["AAPL", "MSFT", "GOOGL"],
-  "last_check": null,
-  "check_interval_minutes": 60
+  "last_check": null
 }
 ```
+
+Edit `json/telegram_config.json` to adjust check intervals:
+```json
+{
+  "polling_interval_seconds": 2,
+  "news_check_interval_seconds": 30
+}
+```
+
+- `polling_interval_seconds`: How often bot checks for Telegram commands (default: 2s)
+- `news_check_interval_seconds`: How often to fetch and send news updates (default: 30s)
 
 ## Commands
 
@@ -90,7 +100,7 @@ Edit `json/portfolio.json` with your stocks:
 
 ## How It Works
 
-1. Scrapes Finviz for latest stock news
+1. Scrapes Finviz.com and StockAnalysis.com for latest stock news (parallel fetching)
 2. FinBERT analyzes headline sentiment
 3. Filters relevant news (positive/negative ≥50% confidence)
 4. Sends formatted updates to Telegram

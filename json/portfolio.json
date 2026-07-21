@@ -6,6 +6,5 @@
     "SPY",
     "BIDU"
   ],
-  "last_check": null,
-  "check_interval_minutes": 60
+  "last_check": null
 }

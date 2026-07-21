@@ -33,10 +33,13 @@ def temp_paths_file(tmp_path):
     )
 
     paths_file = json_dir / "paths.json"
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
     paths_data = {
         "portfolio": str(portfolio_file),
         "telegram_config": str(telegram_config),
         "model_cache": str(tmp_path / "models"),
+        "news_cache": str(data_dir / "news_cache.json"),
     }
     paths_file.write_text(json.dumps(paths_data))
 
@@ -153,34 +156,54 @@ def test_load_telegram_config_missing(tmp_path, monkeypatch):
         helpers.load_telegram_config()
 
 
+@patch("helpers.StockAnalysisScraper")
 @patch("helpers.FinvizScraper")
 @patch("helpers.SentimentClassifier")
 def test_fetch_and_classify_news(
-    mock_classifier_class, mock_scraper_class, temp_paths_file, monkeypatch
+    mock_classifier_class,
+    mock_finviz_class,
+    mock_stockanalysis_class,
+    temp_paths_file,
+    monkeypatch,
 ):
-    """Test fetching and classifying news."""
+    """Test fetching and classifying news from multiple sources."""
     monkeypatch.chdir(temp_paths_file.parent.parent)
 
-    mock_scraper = MagicMock()
+    # Use today's date so news passes the date filter
+    today = datetime.now()
     news1 = NewsItem(
-        timestamp=datetime(2024, 1, 19, 10, 30),
+        timestamp=datetime(today.year, today.month, today.day, 10, 30),
         headline="Apple stock surges",
-        source="MarketWatch",
-        url="https://example.com",
+        source="Finviz",
+        url="https://example.com/1",
         ticker="AAPL",
     )
     news2 = NewsItem(
-        timestamp=datetime(2024, 1, 19, 9, 15),
+        timestamp=datetime(today.year, today.month, today.day, 9, 15),
         headline="Microsoft earnings beat",
-        source="Reuters",
-        url="https://example.com",
+        source="StockAnalysis",
+        url="https://example.com/2",
         ticker="MSFT",
     )
-    mock_scraper.fetch_multiple_tickers.return_value = {
-        "AAPL": [news1],
+    news3 = NewsItem(
+        timestamp=datetime(today.year, today.month, today.day, 11, 0),
+        headline="Google announces AI breakthrough",
+        source="StockAnalysis",
+        url="https://example.com/3",
+        ticker="GOOGL",
+    )
+
+    # Mock both scrapers
+    mock_finviz = MagicMock()
+    mock_finviz.fetch_multiple_tickers.return_value = {"AAPL": [news1]}
+    mock_finviz_class.return_value = mock_finviz
+
+    mock_stockanalysis = MagicMock()
+    mock_stockanalysis.fetch_multiple_tickers.return_value = {
         "MSFT": [news2],
+        "GOOGL": [news3],
     }
-    mock_scraper_class.return_value = mock_scraper
+    mock_stockanalysis_class.return_value = mock_stockanalysis
 
     mock_classifier = MagicMock()
     sentiment1 = SentimentResult(
@@ -193,35 +216,55 @@ def test_fetch_and_classify_news(
         score=0.85,
         label_scores={"positive": 0.10, "negative": 0.05, "neutral": 0.85},
     )
-    mock_classifier.classify.side_effect = [sentiment1, sentiment2]
+    sentiment3 = SentimentResult(
+        label="positive",
+        score=0.88,
+        label_scores={"positive": 0.88, "negative": 0.03, "neutral": 0.09},
+    )
+    mock_classifier.classify.side_effect = [sentiment1, sentiment2, sentiment3]
     mock_classifier_class.return_value = mock_classifier
 
-    tickers = ["AAPL", "MSFT"]
+    tickers = ["AAPL", "MSFT", "GOOGL"]
     results = helpers.fetch_and_classify_news(tickers, max_news_per_ticker=5)
 
-    assert len(results) == 1
-    assert results[0][0].ticker == "AAPL"
+    assert len(results) == 2
+    assert results[0][0].headline == "Google announces AI breakthrough"
     assert results[0][1].label == "positive"
+    assert results[1][0].headline == "Apple stock surges"
+    assert results[1][1].label == "positive"
 
 
+@patch("helpers.StockAnalysisScraper")
 @patch("helpers.FinvizScraper")
 @patch("helpers.SentimentClassifier")
 def test_fetch_and_classify_news_filters_neutral(
-    mock_classifier_class, mock_scraper_class, temp_paths_file, monkeypatch
+    mock_classifier_class,
+    mock_finviz_class,
+    mock_stockanalysis_class,
+    temp_paths_file,
+    monkeypatch,
 ):
     """Test that neutral news is filtered out."""
     monkeypatch.chdir(temp_paths_file.parent.parent)
 
-    mock_scraper = MagicMock()
+    # Use today's date so news passes the date filter
+    today = datetime.now()
     news1 = NewsItem(
-        timestamp=datetime(2024, 1, 19, 10, 30),
+        timestamp=datetime(today.year, today.month, today.day, 10, 30),
         headline="Company announces quarterly report",
-        source="MarketWatch",
+        source="Finviz",
         url="https://example.com",
         ticker="AAPL",
     )
-    mock_scraper.fetch_multiple_tickers.return_value = {"AAPL": [news1]}
-    mock_scraper_class.return_value = mock_scraper
+
+    # Mock both scrapers
+    mock_finviz = MagicMock()
+    mock_finviz.fetch_multiple_tickers.return_value = {"AAPL": [news1]}
+    mock_finviz_class.return_value = mock_finviz
+
+    mock_stockanalysis = MagicMock()
+    mock_stockanalysis.fetch_multiple_tickers.return_value = {}
+    mock_stockanalysis_class.return_value = mock_stockanalysis
 
     mock_classifier = MagicMock()
     sentiment = SentimentResult(
@@ -237,24 +280,37 @@ def test_fetch_and_classify_news_filters_neutral(
     assert len(results) == 0
 
 
+@patch("helpers.StockAnalysisScraper")
 @patch("helpers.FinvizScraper")
 @patch("helpers.SentimentClassifier")
 def test_fetch_and_classify_news_filters_low_confidence(
-    mock_classifier_class, mock_scraper_class, temp_paths_file, monkeypatch
+    mock_classifier_class,
+    mock_finviz_class,
+    mock_stockanalysis_class,
+    temp_paths_file,
+    monkeypatch,
 ):
     """Test that low confidence news is filtered out."""
     monkeypatch.chdir(temp_paths_file.parent.parent)
 
-    mock_scraper = MagicMock()
+    # Use today's date so news passes the date filter
+    today = datetime.now()
     news1 = NewsItem(
-        timestamp=datetime(2024, 1, 19, 10, 30),
+        timestamp=datetime(today.year, today.month, today.day, 10, 30),
         headline="Weak signal",
-        source="MarketWatch",
+        source="Finviz",
         url="https://example.com",
         ticker="AAPL",
     )
-    mock_scraper.fetch_multiple_tickers.return_value = {"AAPL": [news1]}
-    mock_scraper_class.return_value = mock_scraper
+
+    # Mock both scrapers
+    mock_finviz = MagicMock()
+    mock_finviz.fetch_multiple_tickers.return_value = {"AAPL": [news1]}
+    mock_finviz_class.return_value = mock_finviz
+
+    mock_stockanalysis = MagicMock()
+    mock_stockanalysis.fetch_multiple_tickers.return_value = {}
+    mock_stockanalysis_class.return_value = mock_stockanalysis
 
     mock_classifier = MagicMock()
     sentiment = SentimentResult(
@@ -278,7 +334,7 @@ def test_setup_bot(mock_bot_class, temp_paths_file, monkeypatch):
     paths = helpers.load_paths()
     portfolio_path = Path(paths["portfolio"])
 
-    bot = helpers.setup_bot(portfolio_path, "test_token")
+    helpers.setup_bot(portfolio_path, "test_token")
 
     mock_bot_class.assert_called_once()
     call_kwargs = mock_bot_class.call_args[1]
@@ -286,3 +342,71 @@ def test_setup_bot(mock_bot_class, temp_paths_file, monkeypatch):
     assert call_kwargs["portfolio_path"] == portfolio_path
     assert callable(call_kwargs["on_add_stock"])
     assert callable(call_kwargs["on_remove_stock"])
+
+
+def test_news_cache(temp_paths_file, monkeypatch):
+    """Test news cache load and save."""
+    monkeypatch.chdir(temp_paths_file.parent.parent)
+
+    # Initially cache should be empty
+    sent_headlines = helpers.load_news_cache()
+    assert sent_headlines == set()
+
+    # Save some headlines
+    test_headlines = {"Headline 1", "Headline 2", "Headline 3"}
+    helpers.save_news_cache(test_headlines)
+
+    # Load and verify
+    loaded_headlines = helpers.load_news_cache()
+    assert loaded_headlines == test_headlines
+
+
+def test_filter_new_news():
+    """Test filtering duplicate news."""
+    today = datetime.now()
+
+    news1 = NewsItem(
+        timestamp=datetime(today.year, today.month, today.day, 10, 30),
+        headline="Apple stock surges",
+        source="MarketWatch",
+        url="https://example.com/1",
+        ticker="AAPL",
+    )
+    news2 = NewsItem(
+        timestamp=datetime(today.year, today.month, today.day, 11, 0),
+        headline="Microsoft earnings beat",
+        source="Reuters",
+        url="https://example.com/2",
+        ticker="MSFT",
+    )
+    news3 = NewsItem(
+        timestamp=datetime(today.year, today.month, today.day, 11, 30),
+        headline="Apple stock surges",  # Duplicate headline
+        source="Bloomberg",
+        url="https://example.com/3",
+        ticker="AAPL",
+    )
+
+    sentiment = SentimentResult(
+        label="positive",
+        score=0.9,
+        label_scores={"positive": 0.9, "negative": 0.05, "neutral": 0.05},
+    )
+
+    all_news = [(news1, sentiment), (news2, sentiment), (news3, sentiment)]
+
+    # No sent headlines - all news should be returned
+    sent_headlines = set()
+    filtered = helpers.filter_new_news(all_news, sent_headlines)
+    assert len(filtered) == 3
+
+    # Mark first headline as sent - should filter out news1 and news3 (duplicate)
+    sent_headlines = {"Apple stock surges"}
+    filtered = helpers.filter_new_news(all_news, sent_headlines)
+    assert len(filtered) == 1
+    assert filtered[0][0].headline == "Microsoft earnings beat"
+
+    # Mark all as sent - should return empty
+    sent_headlines = {"Apple stock surges", "Microsoft earnings beat"}
+    filtered = helpers.filter_new_news(all_news, sent_headlines)
+    assert len(filtered) == 0
