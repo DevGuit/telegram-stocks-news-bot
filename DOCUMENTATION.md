@@ -64,12 +64,13 @@ Portfolio Updates (add/remove stocks and ETFs via chat commands)
     - Checks each stock against StockAnalysis stocks page
     - Checks each ETF against StockAnalysis ETF page
     - Returns dict with valid/invalid lists for both asset types
-  - `fetch_and_classify_news()`: Orchestrates news scraping + sentiment analysis + date filtering (today only)
+  - `fetch_and_classify_news(tickers, max_news_per_ticker, relevance_threshold, classifier)`: Orchestrates news scraping + sentiment analysis + date filtering (today only)
     - Accepts dict format: `{"stocks": [...], "etf": [...]}` or list (assumes stocks)
     - Fetches from StockAnalysis.com for all tickers (both stocks and ETFs)
     - Deduplicates headlines appearing multiple times
     - Filters news to today only (timezone-aware)
     - Classifies sentiment and filters by relevance
+    - **Optional `classifier` parameter**: Pass pre-loaded SentimentClassifier to avoid reloading model (~500MB)
   - `setup_bot()`: Initialize Telegram bot with callbacks
   - `load_news_cache()`: Load previously sent headlines from cache
   - `save_news_cache()`: Save sent headlines to cache
@@ -121,6 +122,9 @@ Portfolio Updates (add/remove stocks and ETFs via chat commands)
 - **Purpose**: Handle user interactions and deliver news updates
 - **Class**: `StockNewsBot`
   - `__init__(bot_token, portfolio_path, callbacks, model_cache_dir)`: Initialize with token, path, and model cache
+    - **Performance optimization**: Loads FinBERT model once in `__init__` and reuses it for all news updates
+    - Previous behavior: Reloaded ~500MB model on every `/news` command and automatic poll
+  - `classifier`: Pre-loaded SentimentClassifier instance (shared across all news updates)
   - Command handlers: `/start`, `/help`, `/list`, `/addstock`, `/addetf`, `/remove`, `/remove_all`, `/status`, `/news`, `/run`, `/stop`
   - `send_news_update(chat_id, news_items)`: Format and send news messages
   - `run_polling()`: Start bot in polling mode

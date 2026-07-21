@@ -20,7 +20,10 @@ logger = logging.getLogger(__name__)
 
 
 async def send_periodic_updates(
-    bot, chat_id: str, check_interval_seconds: int, valid_portfolio: dict[str, list[str]]
+    bot,
+    chat_id: str,
+    check_interval_seconds: int,
+    valid_portfolio: dict[str, list[str]],
 ):
     """Periodically fetch and send news updates when polling is enabled.
 
@@ -50,7 +53,7 @@ async def send_periodic_updates(
             if total_tickers > 0:
                 logger.info(f"Fetching news for {total_tickers} valid tickers...")
                 classified_news = fetch_and_classify_news(
-                    valid_portfolio, max_news_per_ticker=5
+                    valid_portfolio, max_news_per_ticker=5, classifier=bot.classifier
                 )
 
                 # Filter out already sent news
@@ -132,12 +135,13 @@ def main():
         # Send welcome message to Telegram
         print("Sending welcome message to Telegram...")
         welcome_msg = (
-            "📈 Stock News Monitor Started!\n\n"
-            "✅ Bot is ready and connected.\n\n"
+            "📈 Stock News Monitor Started!\n\n✅ Bot is ready and connected.\n\n"
         )
 
         if stocks_valid or etf_valid:
-            welcome_msg += f"📊 Portfolio: {len(stocks_valid)} stocks, {len(etf_valid)} ETFs\n"
+            welcome_msg += (
+                f"📊 Portfolio: {len(stocks_valid)} stocks, {len(etf_valid)} ETFs\n"
+            )
             if stocks_invalid or etf_invalid:
                 welcome_msg += f"⚠️ {len(stocks_invalid) + len(etf_invalid)} invalid tickers found\n"
         else:
@@ -168,7 +172,9 @@ def main():
 
         # Create portfolio with only valid tickers for monitoring
         valid_portfolio = {"stocks": stocks_valid, "etf": etf_valid}
-        print(f"Starting monitoring for {len(stocks_valid)} stocks and {len(etf_valid)} ETFs")
+        print(
+            f"Starting monitoring for {len(stocks_valid)} stocks and {len(etf_valid)} ETFs"
+        )
 
         update_task = asyncio.create_task(
             send_periodic_updates(bot, chat_id, check_interval_seconds, valid_portfolio)

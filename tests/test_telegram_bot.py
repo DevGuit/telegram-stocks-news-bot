@@ -29,14 +29,20 @@ def temp_portfolio(tmp_path):
 @pytest.fixture
 def bot(temp_portfolio):
     """Create StockNewsBot instance."""
-    with patch("resources.telegram_bot.Application"):
+    with (
+        patch("resources.telegram_bot.Application"),
+        patch("resources.telegram_bot.SentimentClassifier"),
+    ):
         bot = StockNewsBot(bot_token="test_token", portfolio_path=temp_portfolio)
         return bot
 
 
 def test_bot_initialization(temp_portfolio):
     """Test bot initializes correctly."""
-    with patch("resources.telegram_bot.Application") as mock_app:
+    with (
+        patch("resources.telegram_bot.Application") as mock_app,
+        patch("resources.telegram_bot.SentimentClassifier") as mock_classifier,
+    ):
         bot = StockNewsBot(
             bot_token="test_token",
             portfolio_path=temp_portfolio,
@@ -48,6 +54,8 @@ def test_bot_initialization(temp_portfolio):
         assert bot.portfolio_path == temp_portfolio
         assert bot.on_add_stock is not None
         assert bot.on_remove_stock is not None
+        assert bot.classifier is not None  # Classifier initialized in __init__
+        mock_classifier.assert_called_once()  # Verify it was created
         mock_app.builder.assert_called_once()
 
 

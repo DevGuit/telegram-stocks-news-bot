@@ -53,6 +53,11 @@ class StockNewsBot:
         self.polling_enabled = False  # Start with polling disabled
         self.update_task = None  # Track the background update task
 
+        # Initialize classifier once - reuse for all news updates
+        logger.info("Loading FinBERT sentiment model...")
+        self.classifier = SentimentClassifier(model_cache_dir=model_cache_dir)
+        logger.info("FinBERT model loaded successfully")
+
         self.application = Application.builder().token(bot_token).build()
 
         self._setup_handlers()
@@ -66,7 +71,9 @@ class StockNewsBot:
         self.application.add_handler(CommandHandler("addetf", self.cmd_addetf))
         self.application.add_handler(CommandHandler("remove", self.cmd_remove))
         self.application.add_handler(CommandHandler("remove_all", self.cmd_remove_all))
-        self.application.add_handler(CommandHandler("remove_invalid", self.cmd_remove_invalid))
+        self.application.add_handler(
+            CommandHandler("remove_invalid", self.cmd_remove_invalid)
+        )
         self.application.add_handler(CommandHandler("news", self.cmd_news))
         self.application.add_handler(CommandHandler("status", self.cmd_status))
         self.application.add_handler(CommandHandler("run", self.cmd_run))
@@ -338,7 +345,9 @@ class StockNewsBot:
             # This is a bulk removal, so we don't have individual ticker info
             pass
 
-    async def cmd_remove_invalid(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def cmd_remove_invalid(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
         """Handle /remove_invalid command - remove all invalid tickers."""
         portfolio = self._load_portfolio()
 
@@ -422,8 +431,8 @@ class StockNewsBot:
                 msg += ", ".join(removed_etfs) + "\n\n"
 
             total_removed = len(removed_stocks) + len(removed_etfs)
-            total_remaining = (
-                len(portfolio.get("stocks", [])) + len(portfolio.get("etf", []))
+            total_remaining = len(portfolio.get("stocks", [])) + len(
+                portfolio.get("etf", [])
             )
 
             msg += "📊 **Summary:**\n"
@@ -465,9 +474,8 @@ class StockNewsBot:
             from zoneinfo import ZoneInfo
             import os
 
-            # Initialize scraper
+            # Initialize scraper (classifier already loaded in __init__)
             stockanalysis_scraper = StockAnalysisScraper()
-            classifier = SentimentClassifier(model_cache_dir=self.model_cache_dir)
 
             # Fetch from StockAnalysis
             try:
@@ -498,7 +506,7 @@ class StockNewsBot:
                         continue
                     seen_headlines.add(news.headline)
 
-                    sentiment = classifier.classify(news.headline)
+                    sentiment = self.classifier.classify(news.headline)
 
                     if sentiment.label != "neutral" and sentiment.score >= 0.5:
                         classified_news.append((news, sentiment))
@@ -558,7 +566,9 @@ class StockNewsBot:
         if portfolio.get("etf"):
             msg += f"📈 ETFs ({len(portfolio['etf'])}):\n"
             for ticker in portfolio["etf"]:
-                msg += f"  • {ticker}: https://stockanalysis.com/etf/{ticker.lower()}/\n"
+                msg += (
+                    f"  • {ticker}: https://stockanalysis.com/etf/{ticker.lower()}/\n"
+                )
             msg += "\n"
 
         msg += "💡 Quick Actions:\n"
@@ -576,8 +586,7 @@ class StockNewsBot:
         """Handle /run command - start automatic news polling."""
         if self.polling_enabled:
             await update.message.reply_text(
-                "⚠️ Automatic news polling is already running!\n\n"
-                "Use /stop to stop it."
+                "⚠️ Automatic news polling is already running!\n\nUse /stop to stop it."
             )
             return
 
@@ -634,9 +643,7 @@ class StockNewsBot:
         with open(self.portfolio_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
-    async def _validate_ticker(
-        self, ticker: str, asset_type: str = "stocks"
-    ) -> bool:
+    async def _validate_ticker(self, ticker: str, asset_type: str = "stocks") -> bool:
         """Validate ticker by checking if news can be fetched.
 
         Args:

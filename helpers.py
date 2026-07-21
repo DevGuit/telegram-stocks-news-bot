@@ -178,6 +178,7 @@ def fetch_and_classify_news(
     tickers: list[str] | dict[str, list[str]],
     max_news_per_ticker: int = 10,
     relevance_threshold: float = 0.5,
+    classifier: SentimentClassifier | None = None,
 ) -> list[tuple[NewsItem, SentimentResult]]:
     """Fetch news for tickers from StockAnalysis and classify sentiment.
 
@@ -186,17 +187,20 @@ def fetch_and_classify_news(
                 asset type to list of tickers (e.g., {"stocks": ["AAPL"], "etf": ["INQQ"]}).
         max_news_per_ticker: Maximum news items to fetch per ticker.
         relevance_threshold: Minimum confidence for positive/negative sentiment.
+        classifier: Optional pre-loaded SentimentClassifier (avoids reloading model).
 
     Returns:
         List of (NewsItem, SentimentResult) tuples for relevant news only (today's news only).
         News is fetched from StockAnalysis.
     """
-    paths = load_paths()
-    model_cache = Path(paths["model_cache"])
-
-    # Initialize scraper and classifier
+    # Initialize scraper
     stockanalysis_scraper = StockAnalysisScraper()
-    classifier = SentimentClassifier(model_cache_dir=model_cache)
+
+    # Use provided classifier or create new one
+    if classifier is None:
+        paths = load_paths()
+        model_cache = Path(paths["model_cache"])
+        classifier = SentimentClassifier(model_cache_dir=model_cache)
 
     # Fetch news from StockAnalysis
     try:
@@ -352,7 +356,7 @@ def get_user_timezone() -> ZoneInfo:
 
 
 def validate_portfolio_tickers(
-    portfolio: dict[str, list[str]]
+    portfolio: dict[str, list[str]],
 ) -> dict[str, dict[str, list[str]]]:
     """Validate all tickers in portfolio by checking StockAnalysis pages.
 
@@ -366,7 +370,10 @@ def validate_portfolio_tickers(
             "etf": {"valid": [...], "invalid": [...]}
         }
     """
-    results = {"stocks": {"valid": [], "invalid": []}, "etf": {"valid": [], "invalid": []}}
+    results = {
+        "stocks": {"valid": [], "invalid": []},
+        "etf": {"valid": [], "invalid": []},
+    }
     scraper = StockAnalysisScraper(timeout=5)
 
     # Validate stocks

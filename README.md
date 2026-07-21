@@ -166,6 +166,8 @@ See [DOCUMENTATION.md](DOCUMENTATION.md) for detailed technical documentation.
 
 ## Recent Updates
 
+- Fixed timestamp parsing for news items (now correctly parses "X hours ago" format)
+- Optimized FinBERT model loading (loads once at startup, not on every news fetch)
 - Fixed StockAnalysis scraper (adapted to new HTML structure)
 - Added `/run` and `/stop` commands for controlling automatic news polling
 - Changed startup behavior to send welcome message only (no automatic news fetching)
