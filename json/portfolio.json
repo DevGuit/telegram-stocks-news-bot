@@ -1,10 +1,14 @@
 {
   "stocks": [
-    "AAPL",
-    "MSFT",
-    "GOOGL",
-    "SPY",
-    "BIDU"
+    "BIDU",
+    "BMNR",
+    "DUOL",
+    "NVDA",
+    "PGY",
+    "PLTR",
+    "RGTI"
   ],
-  "last_check": null
+  "etf": [
+    "INQQ"
+  ]
 }

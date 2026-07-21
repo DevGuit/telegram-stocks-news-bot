@@ -1,7 +1,6 @@
 {
   "portfolio": "json/portfolio.json",
   "telegram_config": "json/telegram_config.json",
-  "ticker_suggestions": "json/ticker_suggestions.json",
   "news_cache": "data/news_cache.json",
   "model_cache": "data/models"
 }

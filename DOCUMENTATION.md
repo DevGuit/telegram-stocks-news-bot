@@ -4,39 +4,43 @@ This document provides technical details for developers and AI agents working on
 
 ## Architecture Overview
 
-The Stock News Monitor is a Telegram bot that tracks stock news from **multiple sources** (Finviz and StockAnalysis), classifies sentiment using FinBERT, and sends updates to users via parallel fetching for better performance.
+The Stock News Monitor is a Telegram bot that tracks stock and ETF news from **StockAnalysis**, classifies sentiment using FinBERT, and sends updates to users.
 
 ```
-User Portfolio → Multi-Source Scrapers (Finviz + StockAnalysis, parallel) → News Items
-                                                                               ↓
-                                                            FinBERT Classifier → Sentiment Analysis
-                                                                               ↓
+User Portfolio (Stocks + ETFs) → StockAnalysis Scraper → News Items
+                                                              ↓
+                                           FinBERT Classifier → Sentiment Analysis
+                                                              ↓
 User ← Telegram Bot ← Formatted Messages ← Filtered Relevant News ←──────────┘
   ↓
-Portfolio Updates (add/remove stocks via chat commands)
+Portfolio Updates (add/remove stocks and ETFs via chat commands)
 ```
 
 ## Data Flow
 
 ### News Monitoring Flow
-1. **Portfolio Loading**: `helpers.load_portfolio()` reads stock tickers from `json/portfolio.json`
-2. **Cache Loading**: `helpers.load_news_cache()` loads previously sent headlines from `data/news_cache.json`
-3. **Multi-Source News Fetching**: Two scrapers fetch news in parallel using ThreadPoolExecutor:
-   - `FinvizScraper` - Finviz.com
-   - `StockAnalysisScraper` - StockAnalysis.com
-   - Both parse HTML with BeautifulSoup, results merged into single stream
-   - Parallel execution reduces fetch time to max(finviz_time, stockanalysis_time) instead of sum
-4. **Date Filtering**: Only news from today is processed (ignores older news)
-5. **Within-Fetch Duplicate Detection**: Same headline from different sources is deduplicated
-6. **Sentiment Analysis**: `SentimentClassifier` (FinBERT) classifies each headline as positive/negative/neutral
-7. **Relevance Filtering**: Only relevant news (positive/negative with confidence ≥ 50%) is kept
-8. **Cross-Time Duplicate Filtering**: `helpers.filter_new_news()` removes headlines that were already sent
-9. **Delivery**: Formatted messages sent via Telegram bot to user's chat
-10. **Cache Update**: `helpers.save_news_cache()` saves new headlines to prevent future duplicates
+1. **Portfolio Loading**: `helpers.load_portfolio()` reads stock and ETF tickers from `json/portfolio.json` as dict: `{"stocks": [...], "etf": [...]}`
+2. **Startup Validation**: `helpers.validate_portfolio_tickers()` validates all tickers against StockAnalysis
+   - Checks each stock ticker against StockAnalysis stocks page
+   - Checks each ETF ticker against StockAnalysis ETF page
+   - Sends validation summary to Telegram with valid/invalid tickers
+   - Logs validation results to console
+3. **Cache Loading**: `helpers.load_news_cache()` loads previously sent headlines from `data/news_cache.json`
+4. **News Fetching**: `StockAnalysisScraper` fetches news from StockAnalysis.com
+   - Supports both stocks (`/stocks/{ticker}/`) and ETFs (`/etf/{ticker}/`)
+   - Parses HTML with BeautifulSoup
+   - Fetches news for all tickers in portfolio (both stocks and ETFs)
+5. **Date Filtering**: Only news from today is processed (ignores older news)
+6. **Within-Fetch Duplicate Detection**: Same headline appearing multiple times is deduplicated
+7. **Sentiment Analysis**: `SentimentClassifier` (FinBERT) classifies each headline as positive/negative/neutral
+8. **Relevance Filtering**: Only relevant news (positive/negative with confidence ≥ 50%) is kept
+9. **Cross-Time Duplicate Filtering**: `helpers.filter_new_news()` removes headlines that were already sent
+10. **Delivery**: Formatted messages sent via Telegram bot to user's chat
+11. **Cache Update**: `helpers.save_news_cache()` saves new headlines to prevent future duplicates
 
 ### Telegram Bot Flow
-1. **User Commands**: `/add TICKER`, `/remove TICKER`, `/list`, `/help`, `/status`
-2. **Portfolio Updates**: Commands modify `json/portfolio.json` in real-time
+1. **User Commands**: `/addstock TICKER`, `/addetf TICKER`, `/remove TICKER`, `/list`, `/help`, `/status`
+2. **Portfolio Updates**: Commands modify `json/portfolio.json` in real-time, updating the dict structure with separate stocks and ETF lists
 3. **Periodic Updates**: Background task fetches news every N seconds (configurable, default: 30s)
 4. **On-Demand Updates**: `/status` command triggers immediate news fetch independent of periodic checks
 5. **Message Formatting**: News grouped by ticker, with sentiment emoji and confidence scores
@@ -54,42 +58,41 @@ Portfolio Updates (add/remove stocks via chat commands)
 - **Key Functions**:
   - `load_paths()`: Loads file paths from `json/paths.json` (ONLY place that hardcodes a path)
   - `setup_logging()`: Configures application logging
-  - `load_portfolio()` / `save_portfolio()`: Manage stock ticker list
+  - `load_portfolio()` / `save_portfolio()`: Manage stock and ETF ticker dict: `{"stocks": [...], "etf": [...]}`
   - `load_telegram_config()`: Load bot token and chat ID from environment variables and config file
-  - `fetch_and_classify_news()`: Orchestrates multi-source scraping + sentiment analysis + date filtering (today only)
-    - Fetches from both sources (Finviz, StockAnalysis) in parallel using ThreadPoolExecutor
-    - Deduplicates headlines from different sources within same fetch
+  - `validate_portfolio_tickers(portfolio)`: Validate all tickers in portfolio at startup
+    - Checks each stock against StockAnalysis stocks page
+    - Checks each ETF against StockAnalysis ETF page
+    - Returns dict with valid/invalid lists for both asset types
+  - `fetch_and_classify_news()`: Orchestrates news scraping + sentiment analysis + date filtering (today only)
+    - Accepts dict format: `{"stocks": [...], "etf": [...]}` or list (assumes stocks)
+    - Fetches from StockAnalysis.com for all tickers (both stocks and ETFs)
+    - Deduplicates headlines appearing multiple times
     - Filters news to today only (timezone-aware)
     - Classifies sentiment and filters by relevance
   - `setup_bot()`: Initialize Telegram bot with callbacks
   - `load_news_cache()`: Load previously sent headlines from cache
   - `save_news_cache()`: Save sent headlines to cache
   - `filter_new_news()`: Filter out news that was already sent
+  - `get_user_timezone()`: Get user's timezone from environment variable
 - **Pattern**: Functions instantiate classes from `resources/` inside function body
 - **Exports**: Defines `__all__` for clean wildcard import in main.py
 
-### resources/finviz_scraper.py
-- **Purpose**: Fetch latest stock news from Finviz
-- **Class**: `FinvizScraper`
-  - `__init__(timeout)`: Initialize with HTTP timeout
-  - `fetch_news(ticker, max_news)`: Scrape news for single ticker
-  - `fetch_multiple_tickers(tickers, max_news_per_ticker)`: Batch scraping
-  - `_parse_timestamp(date_str, time_str)`: Parse Finviz datetime format
-- **Data Class**: `NewsItem` - timestamp, headline, source, url, ticker
-- **Dependencies**: `requests` for HTTP, `beautifulsoup4` for HTML parsing
-- **Runnable**: Contains `if __name__ == "__main__":` example
-
 ### resources/stockanalysis_scraper.py
-- **Purpose**: Fetch latest stock news from StockAnalysis.com
+- **Purpose**: Fetch latest stock and ETF news from StockAnalysis.com
 - **Class**: `StockAnalysisScraper`
   - `__init__(timeout)`: Initialize with HTTP timeout
-  - `fetch_news(ticker, max_news)`: Scrape news for single ticker
+  - `fetch_news(ticker, max_news, asset_type)`: Scrape news for single ticker
+    - `asset_type`: "stocks" or "etf" (default: "stocks")
   - `fetch_multiple_tickers(tickers, max_news_per_ticker)`: Batch scraping
-- **Data Class**: Reuses `NewsItem` from finviz_scraper
-- **URL Pattern**: `https://stockanalysis.com/stocks/{ticker}/` (lowercase ticker)
+    - Accepts dict: `{"stocks": [...], "etf": [...]}` or list (assumes stocks)
+- **Data Class**: `NewsItem` - timestamp, headline, source, url, ticker
+- **URL Patterns**:
+  - Stocks: `https://stockanalysis.com/stocks/{ticker}/` (lowercase ticker)
+  - ETFs: `https://stockanalysis.com/etf/{ticker}/` (lowercase ticker)
 - **HTML Parsing**: Looks for `<div id="news">` or `<section class="news">`
 - **Dependencies**: `requests` for HTTP, `beautifulsoup4` for HTML parsing
-- **Runnable**: Contains `if __name__ == "__main__":` example
+- **Runnable**: Contains `if __name__ == "__main__":` example with both stocks and ETFs
 
 ### resources/sentiment_classifier.py
 - **Purpose**: Financial sentiment analysis using FinBERT
@@ -108,28 +111,40 @@ Portfolio Updates (add/remove stocks via chat commands)
 - **Purpose**: Handle user interactions and deliver news updates
 - **Class**: `StockNewsBot`
   - `__init__(bot_token, portfolio_path, callbacks, model_cache_dir)`: Initialize with token, path, and model cache
-  - Command handlers: `/start`, `/help`, `/list`, `/add`, `/remove`, `/status`
+  - Command handlers: `/start`, `/help`, `/list`, `/addstock`, `/addetf`, `/remove`, `/remove_all`, `/status`, `/news`, `/run`, `/stop`
   - `send_news_update(chat_id, news_items)`: Format and send news messages
-  - `cmd_status()`: On-demand news fetch (independent of periodic polling)
   - `run_polling()`: Start bot in polling mode
+  - `_add_ticker(update, ticker, asset_type, asset_label)`: Shared helper for adding stocks/ETFs with validation
+  - `_load_portfolio()` / `_save_portfolio()`: Load/save dict format: `{"stocks": [...], "etf": [...]}`
+  - `_validate_ticker(ticker, asset_type)`: Validate ticker against StockAnalysis by asset type
+  - `polling_enabled`: Boolean flag to control automatic news fetching
 - **Commands**:
-  - `/add TICKER` - Add stock to portfolio (validates ticker via Finviz before adding)
-  - `/remove TICKER` - Remove stock from portfolio
-  - `/list` - View current portfolio
-  - `/status` - Fetch latest news immediately (on-demand, independent of polling)
+  - `/addstock TICKER` - Add stock to portfolio (validates ticker via StockAnalysis stocks page)
+  - `/addetf TICKER` - Add ETF to portfolio (validates ticker via StockAnalysis ETF page)
+  - `/remove TICKER` - Remove stock or ETF from portfolio (auto-detects which category)
+  - `/remove_all` - Remove all tickers from portfolio
+  - `/remove_invalid` - Remove all invalid tickers (validates and removes automatically)
+  - `/list` - View current portfolio (shows stocks and ETFs separately with validation)
+  - `/status` - Show portfolio status with StockAnalysis links
+  - `/news` - Fetch latest news manually (on-demand, independent of automatic polling)
+  - `/run` - Start automatic news polling (every 30 seconds)
+  - `/stop` - Stop automatic news polling
   - `/help` - Show help message
-- **Ticker Validation**: Before adding a stock, the bot validates it by checking if Finviz has a page for it
-- **Smart Suggestions**: When validation fails, suggests correct alternatives (e.g., SP500 → suggests SPY, VOO, IVV)
+- **Ticker Validation**: Before adding, validates ticker against correct StockAnalysis page (stocks vs ETF)
+- **Portfolio Format**: `{"stocks": ["AAPL", ...], "etf": ["INQQ", ...]}` - backward compatible with old "etfs" key
 - **Message Format**: Grouped by ticker, sentiment emoji, confidence %, source, timestamp
 - **Dependencies**: `python-telegram-bot` (async version)
 - **Runnable**: Contains `if __name__ == "__main__":` example
 
 ### json/portfolio.json
-- **Purpose**: User's stock watchlist
+- **Purpose**: User's stock and ETF watchlist
+- **Format**: Dict with separate lists for stocks and ETFs
 - **Fields**:
-  - `stocks`: List of ticker symbols (e.g., ["AAPL", "MSFT", "GOOGL"])
+  - `stocks`: List of stock ticker symbols (e.g., ["AAPL", "MSFT", "GOOGL"])
+  - `etf`: List of ETF ticker symbols (e.g., ["INQQ", "SGLD", "QDV5"])
   - `last_check`: ISO timestamp of last news fetch
-- **Modified by**: Telegram bot commands (`/add`, `/remove`)
+- **Modified by**: Telegram bot commands (`/addstock`, `/addetf`, `/remove`)
+- **Backward Compatibility**: Supports old "etfs" key (mapped to "etf" on load)
 - **Note**: Check interval configuration moved to `telegram_config.json`
 
 ### json/telegram_config.json
@@ -152,7 +167,6 @@ Portfolio Updates (add/remove stocks via chat commands)
 - **Keys**:
   - `portfolio`: Path to portfolio.json
   - `telegram_config`: Path to telegram_config.json
-  - `ticker_suggestions`: Path to ticker suggestions mapping
   - `news_cache`: Path to cached news headlines (prevents duplicate sending)
   - `model_cache`: Directory for FinBERT model cache
 - **Rule**: ALL file/folder paths in the project come from this file
@@ -165,19 +179,16 @@ Portfolio Updates (add/remove stocks via chat commands)
 - **Behavior**:
   - Headlines are compared exactly (case-sensitive)
   - Cache persists across bot restarts
-  - Prevents sending same news multiple times when it appears on Finviz
+  - Prevents sending same news multiple times
   - Automatically created on first run
 
 ## Design Decisions
 
-### Why Multi-Source HTML Scraping (Not APIs)?
-- **No API Keys Required**: Free access to news data from Finviz and StockAnalysis
-- **Broader Coverage**: Multiple sources reduce chance of missing important updates
+### Why HTML Scraping (Not APIs)?
+- **No API Keys Required**: Free access to news data from StockAnalysis
 - **Real-Time**: Latest news as soon as published
 - **Rich Metadata**: Source, timestamp, URL from HTML structure
-- **Graceful Degradation**: If one source fails, the other continues working
-- **Parallel Fetching**: ThreadPoolExecutor reduces total fetch time significantly
-- **Trade-off**: May break if any site changes HTML structure (handled per-source with try-except)
+- **Trade-off**: May break if site changes HTML structure (handled with try-except)
 
 ### Why FinBERT Instead of Generic BERT?
 - **Financial Domain**: Pre-trained on financial news corpus
@@ -198,8 +209,8 @@ Portfolio Updates (add/remove stocks via chat commands)
 ## Dependencies
 
 ### Runtime
-- `requests`: HTTP client for multi-source news scraping (Finviz, StockAnalysis)
-- `beautifulsoup4`: HTML parsing for news extraction from all sources
+- `requests`: HTTP client for news scraping (StockAnalysis)
+- `beautifulsoup4`: HTML parsing for news extraction
 - `lxml`: XML/HTML parser backend for BeautifulSoup (faster than default)
 - `python-telegram-bot`: Async Telegram Bot API client
 - `transformers`: HuggingFace library for FinBERT
@@ -258,15 +269,18 @@ uv run python main.py
 ## Current Features
 
 ### News Monitoring
-- **Multi-source scraping**: Fetches news from Finviz and StockAnalysis in parallel
-- **Parallel fetching**: ThreadPoolExecutor with 2 workers for faster performance
-- HTML parsing with BeautifulSoup for both sources
+- **StockAnalysis scraping**: Fetches news from StockAnalysis.com for both stocks and ETFs
+- HTML parsing with BeautifulSoup
 - Timestamp extraction and parsing
-- Concurrent fetching for all portfolio stocks across both sources
-- **Graceful error handling**: If one source fails, the other continues working
+- Fetching for all portfolio stocks and ETFs
+- **Startup validation**: Validates all tickers in portfolio against StockAnalysis at startup
+  - Sends validation summary to Telegram
+  - Logs valid/invalid tickers to console
+  - Helps identify broken tickers before monitoring begins
+- **Graceful error handling**: Handles network and parsing errors
 - **Date filtering**: Only today's news is processed (ignores older news)
-- **Two-level duplicate detection**:
-  - Within-fetch: Deduplicates same headline from different sources
+- **Duplicate detection**:
+  - Within-fetch: Deduplicates same headline appearing multiple times
   - Cross-time: Tracks sent headlines to prevent re-sending same news
 - **News cache**: Persistent cache across bot restarts
 
@@ -277,14 +291,14 @@ uv run python main.py
 - Batch processing support
 
 ### Telegram Bot
-- Interactive commands for portfolio management
-- Real-time stock additions/removals via chat
-- Ticker validation before adding to portfolio (prevents invalid symbols)
-- Smart suggestions for common ticker mistakes (SP500→SPY, NASDAQ→QQQ, etc.)
-- Formatted news updates with emoji indicators
-- **Fast periodic updates**: Checks every 30 seconds by default (configurable)
-- **Immediate startup check**: Sends news immediately on bot start
-- On-demand news fetching via `/status` command (independent of polling)
+- Interactive commands for portfolio management (separate commands for stocks and ETFs)
+- Real-time stock and ETF additions/removals via chat
+- Ticker validation before adding to portfolio (validates against correct asset type page)
+- **Manual news fetching**: Use `/news` to fetch latest news on demand
+- **Automatic polling control**: Use `/run` to start and `/stop` to stop automatic news updates
+- **Startup behavior**: Sends welcome message only, no automatic news fetching until `/run` or `/news` is used
+- Formatted news updates with emoji indicators and sentiment analysis
+- **Periodic updates when enabled**: Checks every 30 seconds when `/run` is active
 - Graceful error handling and logging
 - Secure credential management via `.env` file
 
@@ -295,7 +309,7 @@ Potential features to add:
 - ✅ ~~**News Deduplication**: Cache seen news items to avoid repeats~~ (IMPLEMENTED)
 - ✅ ~~**Date Filtering**: Only show today's news~~ (IMPLEMENTED)
 - ✅ ~~**Fast Updates**: Check every 30 seconds instead of 60 minutes~~ (IMPLEMENTED)
-- ✅ ~~**Multi-Source Scraping**: Aggregate news from multiple sources~~ (IMPLEMENTED - Finviz, StockAnalysis with parallel fetching)
+- ✅ ~~**Multi-Source Scraping**: Aggregate news from multiple sources~~ (REMOVED - now uses only StockAnalysis)
 - **Additional News Sources**: Add more scrapers (Bloomberg, Reuters, CNBC, etc.)
 - **Price Alerts**: Integrate price data and alert on movements
 - **Custom Filters**: User-defined keywords or sentiment thresholds
@@ -315,7 +329,7 @@ When adding features, follow the established patterns documented above.
 4. **Async everywhere**: Telegram bot operations must be `async`/`await`
 5. **Type hints required**: All public functions must have type hints
 6. **FinBERT is large**: ~500MB model download on first run
-7. **Rate limiting**: Finviz may rate-limit if too many requests too fast
+7. **Rate limiting**: StockAnalysis may rate-limit if too many requests too fast
 8. **Credentials in .env**: Never commit `.env` file - use `.env.example` template
 9. **News cache grows**: `data/news_cache.json` accumulates headlines over time (future: auto-cleanup)
 10. **Check interval**: Set `news_check_interval_seconds` carefully - too low may hit rate limits
@@ -323,10 +337,7 @@ When adding features, follow the established patterns documented above.
    - ❌ SP500 → ✅ SPY (S&P 500)
    - ❌ NASDAQ → ✅ QQQ (Nasdaq-100)
    - ❌ DOW → ✅ DIA (Dow Jones)
-12. **Multi-source scraping trade-offs**: Three sources means more comprehensive coverage but:
-   - Three HTTP requests per ticker (slower than single source)
-   - Any source HTML change only affects that source (graceful degradation)
-   - Duplicate headlines are automatically filtered within each fetch
+12. **Single-source scraping**: Uses only StockAnalysis for consistent, reliable news
 
 ## Troubleshooting
 
@@ -336,11 +347,10 @@ When adding features, follow the established patterns documented above.
 - Ensure you've sent `/start` to the bot first
 
 ### News not fetching
-- Check news sources are accessible (test scrapers standalone):
-  - `uv run python resources/finviz_scraper.py`
+- Check StockAnalysis is accessible (test scraper standalone):
   - `uv run python resources/stockanalysis_scraper.py`
 - Verify ticker symbols are valid
-- Check logs for HTTP errors (sources fail gracefully, so check which source is working)
+- Check logs for HTTP errors
 
 ### Sentiment always neutral
 - FinBERT may need warm-up (first prediction slow)
@@ -353,22 +363,19 @@ When adding features, follow the established patterns documented above.
 - Close other applications
 
 ### Invalid ticker error when adding stock
-- Bot validates tickers by checking Finviz
+- Bot validates tickers by checking StockAnalysis
 - Use exact ticker symbols (e.g., "AAPL" not "Apple")
 - For indices, use ETF tickers: SPY (S&P 500), QQQ (Nasdaq), DIA (Dow)
 - The bot will suggest correct alternatives for common mistakes:
   - `/add SP500` → Suggests: SPY, VOO, IVV
   - `/add NASDAQ` → Suggests: QQQ, ONEQ
   - `/add BITCOIN` → Suggests: BITO, GBTC
-- Search ticker on Finviz or StockAnalysis first if unsure
+- Search ticker on StockAnalysis first if unsure
 
 ## Testing the System
 
 ### Test Individual Scrapers
 ```bash
-# Test Finviz scraper
-uv run python resources/finviz_scraper.py
-
 # Test StockAnalysis scraper
 uv run python resources/stockanalysis_scraper.py
 ```
@@ -389,7 +396,6 @@ uv run python resources/telegram_bot.py
 uv run pytest -v
 
 # Run specific test files
-uv run pytest tests/test_finviz_scraper.py -v
 uv run pytest tests/test_stockanalysis_scraper.py -v
 uv run pytest tests/test_helpers.py -v
 ```

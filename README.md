@@ -4,10 +4,11 @@ A Telegram bot that monitors stock news, analyzes sentiment with AI, and sends y
 
 ## Features
 
-- Manage portfolio via Telegram chat
-- Auto-scrapes Finviz news (no API key)
+- Manage portfolio via Telegram chat (stocks and ETFs)
+- Auto-scrapes StockAnalysis news (no API key)
 - AI sentiment analysis (FinBERT)
 - Smart ticker validation with suggestions
+- Portfolio validation on startup (shows valid/invalid tickers)
 - On-demand updates with `/status`
 - Secure credential management
 
@@ -68,10 +69,11 @@ uv run python main.py
 
 ### 4. Configure Portfolio and Settings
 
-Edit `json/portfolio.json` with your stocks:
+Edit `json/portfolio.json` with your stocks and ETFs:
 ```json
 {
   "stocks": ["AAPL", "MSFT", "GOOGL"],
+  "etf": ["INQQ", "SGLD"],
   "last_check": null
 }
 ```
@@ -90,20 +92,23 @@ Edit `json/telegram_config.json` to adjust check intervals:
 ## Commands
 
 - `/start` - Initialize bot
-- `/list` - View portfolio
-- `/add TICKER` - Add stock (auto-validates)
-- `/remove TICKER` - Remove stock
+- `/list` - View portfolio (stocks and ETFs shown separately)
+- `/addstock TICKER` - Add stock (auto-validates against StockAnalysis)
+- `/addetf TICKER` - Add ETF (auto-validates against StockAnalysis)
+- `/remove TICKER` - Remove stock or ETF
+- `/remove_all` - Remove all invalid tickers at once
 - `/status` - Get news now
 - `/help` - Show help
 
-**Tip**: Invalid tickers like "SP500" will suggest valid alternatives (SPY, VOO, IVV)
+**Tip**: Invalid tickers will suggest valid alternatives from ticker suggestions file
 
 ## How It Works
 
-1. Scrapes Finviz.com and StockAnalysis.com for latest stock news (parallel fetching)
-2. FinBERT analyzes headline sentiment
-3. Filters relevant news (positive/negative ≥50% confidence)
-4. Sends formatted updates to Telegram
+1. Validates all tickers in portfolio at startup (sends summary to Telegram)
+2. Scrapes StockAnalysis.com for latest stock and ETF news
+3. FinBERT analyzes headline sentiment
+4. Filters relevant news (positive/negative ≥50% confidence)
+5. Sends formatted updates to Telegram
 
 ## Troubleshooting
 
@@ -122,7 +127,7 @@ Edit `json/telegram_config.json` to adjust check intervals:
 
 ## Technical Stack
 
-- **Finviz**: HTML scraping (BeautifulSoup)
+- **StockAnalysis**: HTML scraping (BeautifulSoup)
 - **FinBERT**: Pre-trained financial sentiment model
 - **Telegram**: python-telegram-bot (async)
 - **Architecture**: Async Python with asyncio

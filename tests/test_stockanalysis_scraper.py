@@ -33,7 +33,7 @@ def mock_html():
 def test_scraper_initialization(scraper):
     """Test StockAnalysisScraper initializes correctly."""
     assert scraper.timeout == 5
-    assert scraper.base_url == "https://stockanalysis.com/stocks"
+    assert scraper.base_url == "https://stockanalysis.com"
     assert "User-Agent" in scraper.headers
 
 

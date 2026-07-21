@@ -84,9 +84,9 @@ def test_load_portfolio(temp_paths_file, monkeypatch):
     """Test loading portfolio."""
     monkeypatch.chdir(temp_paths_file.parent.parent)
 
-    stocks = helpers.load_portfolio()
+    portfolio = helpers.load_portfolio()
 
-    assert stocks == ["AAPL", "MSFT"]
+    assert portfolio == {"stocks": ["AAPL", "MSFT"], "etf": []}
 
 
 def test_load_portfolio_empty(tmp_path, monkeypatch):
@@ -101,17 +101,17 @@ def test_load_portfolio_empty(tmp_path, monkeypatch):
 
     monkeypatch.chdir(tmp_path)
 
-    stocks = helpers.load_portfolio()
+    portfolio = helpers.load_portfolio()
 
-    assert stocks == []
+    assert portfolio == {"stocks": [], "etf": []}
 
 
 def test_save_portfolio(temp_paths_file, monkeypatch):
     """Test saving portfolio."""
     monkeypatch.chdir(temp_paths_file.parent.parent)
 
-    new_stocks = ["AAPL", "GOOGL", "TSLA"]
-    helpers.save_portfolio(new_stocks)
+    new_portfolio = {"stocks": ["AAPL", "GOOGL", "TSLA"], "etf": ["INQQ"]}
+    helpers.save_portfolio(new_portfolio)
 
     paths = helpers.load_paths()
     portfolio_path = Path(paths["portfolio"])
@@ -119,7 +119,8 @@ def test_save_portfolio(temp_paths_file, monkeypatch):
     with open(portfolio_path, "r") as f:
         data = json.load(f)
 
-    assert data["stocks"] == new_stocks
+    assert data["stocks"] == ["AAPL", "GOOGL", "TSLA"]
+    assert data["etf"] == ["INQQ"]
     assert "last_check" in data
     assert isinstance(data["last_check"], str)
 
@@ -157,16 +158,14 @@ def test_load_telegram_config_missing(tmp_path, monkeypatch):
 
 
 @patch("helpers.StockAnalysisScraper")
-@patch("helpers.FinvizScraper")
 @patch("helpers.SentimentClassifier")
 def test_fetch_and_classify_news(
     mock_classifier_class,
-    mock_finviz_class,
     mock_stockanalysis_class,
     temp_paths_file,
     monkeypatch,
 ):
-    """Test fetching and classifying news from multiple sources."""
+    """Test fetching and classifying news from StockAnalysis."""
     monkeypatch.chdir(temp_paths_file.parent.parent)
 
     # Use today's date so news passes the date filter
@@ -174,7 +173,7 @@ def test_fetch_and_classify_news(
     news1 = NewsItem(
         timestamp=datetime(today.year, today.month, today.day, 10, 30),
         headline="Apple stock surges",
-        source="Finviz",
+        source="StockAnalysis",
         url="https://example.com/1",
         ticker="AAPL",
     )
@@ -193,13 +192,10 @@ def test_fetch_and_classify_news(
         ticker="GOOGL",
     )
 
-    # Mock both scrapers
-    mock_finviz = MagicMock()
-    mock_finviz.fetch_multiple_tickers.return_value = {"AAPL": [news1]}
-    mock_finviz_class.return_value = mock_finviz
-
+    # Mock StockAnalysis scraper
     mock_stockanalysis = MagicMock()
     mock_stockanalysis.fetch_multiple_tickers.return_value = {
+        "AAPL": [news1],
         "MSFT": [news2],
         "GOOGL": [news3],
     }
@@ -228,6 +224,7 @@ def test_fetch_and_classify_news(
     results = helpers.fetch_and_classify_news(tickers, max_news_per_ticker=5)
 
     assert len(results) == 2
+    # Results sorted by timestamp descending (most recent first)
     assert results[0][0].headline == "Google announces AI breakthrough"
     assert results[0][1].label == "positive"
     assert results[1][0].headline == "Apple stock surges"
@@ -235,11 +232,9 @@ def test_fetch_and_classify_news(
 
 
 @patch("helpers.StockAnalysisScraper")
-@patch("helpers.FinvizScraper")
 @patch("helpers.SentimentClassifier")
 def test_fetch_and_classify_news_filters_neutral(
     mock_classifier_class,
-    mock_finviz_class,
     mock_stockanalysis_class,
     temp_paths_file,
     monkeypatch,
@@ -252,18 +247,14 @@ def test_fetch_and_classify_news_filters_neutral(
     news1 = NewsItem(
         timestamp=datetime(today.year, today.month, today.day, 10, 30),
         headline="Company announces quarterly report",
-        source="Finviz",
+        source="StockAnalysis",
         url="https://example.com",
         ticker="AAPL",
     )
 
-    # Mock both scrapers
-    mock_finviz = MagicMock()
-    mock_finviz.fetch_multiple_tickers.return_value = {"AAPL": [news1]}
-    mock_finviz_class.return_value = mock_finviz
-
+    # Mock StockAnalysis scraper
     mock_stockanalysis = MagicMock()
-    mock_stockanalysis.fetch_multiple_tickers.return_value = {}
+    mock_stockanalysis.fetch_multiple_tickers.return_value = {"AAPL": [news1]}
     mock_stockanalysis_class.return_value = mock_stockanalysis
 
     mock_classifier = MagicMock()
@@ -281,11 +272,9 @@ def test_fetch_and_classify_news_filters_neutral(
 
 
 @patch("helpers.StockAnalysisScraper")
-@patch("helpers.FinvizScraper")
 @patch("helpers.SentimentClassifier")
 def test_fetch_and_classify_news_filters_low_confidence(
     mock_classifier_class,
-    mock_finviz_class,
     mock_stockanalysis_class,
     temp_paths_file,
     monkeypatch,
@@ -298,18 +287,14 @@ def test_fetch_and_classify_news_filters_low_confidence(
     news1 = NewsItem(
         timestamp=datetime(today.year, today.month, today.day, 10, 30),
         headline="Weak signal",
-        source="Finviz",
+        source="StockAnalysis",
         url="https://example.com",
         ticker="AAPL",
     )
 
-    # Mock both scrapers
-    mock_finviz = MagicMock()
-    mock_finviz.fetch_multiple_tickers.return_value = {"AAPL": [news1]}
-    mock_finviz_class.return_value = mock_finviz
-
+    # Mock StockAnalysis scraper
     mock_stockanalysis = MagicMock()
-    mock_stockanalysis.fetch_multiple_tickers.return_value = {}
+    mock_stockanalysis.fetch_multiple_tickers.return_value = {"AAPL": [news1]}
     mock_stockanalysis_class.return_value = mock_stockanalysis
 
     mock_classifier = MagicMock()

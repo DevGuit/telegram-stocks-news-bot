@@ -17,6 +17,7 @@ def temp_portfolio(tmp_path):
         json.dumps(
             {
                 "stocks": ["AAPL", "MSFT"],
+                "etf": [],
                 "last_check": None,
                 "check_interval_minutes": 60,
             }
@@ -52,27 +53,28 @@ def test_bot_initialization(temp_portfolio):
 
 def test_load_portfolio(bot, temp_portfolio):
     """Test loading portfolio from file."""
-    stocks = bot._load_portfolio()
+    portfolio = bot._load_portfolio()
 
-    assert stocks == ["AAPL", "MSFT"]
+    assert portfolio == {"stocks": ["AAPL", "MSFT"], "etf": []}
 
 
 def test_load_portfolio_empty(bot, tmp_path):
     """Test loading non-existent portfolio."""
     bot.portfolio_path = tmp_path / "nonexistent.json"
-    stocks = bot._load_portfolio()
+    portfolio = bot._load_portfolio()
 
-    assert stocks == []
+    assert portfolio == {"stocks": [], "etf": []}
 
 
 def test_save_portfolio(bot, temp_portfolio):
     """Test saving portfolio to file."""
-    bot._save_portfolio(["AAPL", "GOOGL", "TSLA"])
+    bot._save_portfolio({"stocks": ["AAPL", "GOOGL", "TSLA"], "etf": ["INQQ"]})
 
     with open(temp_portfolio, "r") as f:
         data = json.load(f)
 
     assert data["stocks"] == ["AAPL", "GOOGL", "TSLA"]
+    assert data["etf"] == ["INQQ"]
     assert "last_check" in data
     assert "check_interval_minutes" in data
 
@@ -102,7 +104,7 @@ async def test_cmd_help(bot):
     mock_update.message.reply_text.assert_called_once()
     call_args = mock_update.message.reply_text.call_args[0][0]
     assert "/list" in call_args
-    assert "/add" in call_args
+    assert "/addstock" in call_args
     assert "/remove" in call_args
 
 
@@ -118,7 +120,7 @@ async def test_cmd_list_with_stocks(bot):
     call_args = mock_update.message.reply_text.call_args[0][0]
     assert "AAPL" in call_args
     assert "MSFT" in call_args
-    assert "2 stocks" in call_args
+    assert "2 tickers" in call_args
 
 
 @pytest.mark.asyncio
@@ -139,8 +141,8 @@ async def test_cmd_list_empty(bot, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_cmd_add_new_stock(bot):
-    """Test /add command with new stock."""
+async def test_cmd_addstock_new_stock(bot):
+    """Test /addstock command with new stock."""
     mock_update = MagicMock()
     mock_update.message.reply_text = AsyncMock()
     mock_context = MagicMock()
@@ -149,50 +151,50 @@ async def test_cmd_add_new_stock(bot):
     # Mock the validation to return True (valid ticker)
     bot._validate_ticker = AsyncMock(return_value=(True, []))
 
-    await bot.cmd_add(mock_update, mock_context)
+    await bot.cmd_addstock(mock_update, mock_context)
 
-    stocks = bot._load_portfolio()
-    assert "GOOGL" in stocks
+    portfolio = bot._load_portfolio()
+    assert "GOOGL" in portfolio["stocks"]
 
-    # Should be called at least twice: "Validating..." and "Added GOOGL"
+    # Should be called at least twice: "Validating..." and "Added stock GOOGL"
     assert mock_update.message.reply_text.call_count >= 2
 
     # Check the last call contains the success message
     last_call = mock_update.message.reply_text.call_args_list[-1][0][0]
-    assert "Added GOOGL" in last_call
+    assert "Added stock GOOGL" in last_call
 
 
 @pytest.mark.asyncio
-async def test_cmd_add_existing_stock(bot):
-    """Test /add command with existing stock."""
+async def test_cmd_addstock_existing_stock(bot):
+    """Test /addstock command with existing stock."""
     mock_update = MagicMock()
     mock_update.message.reply_text = AsyncMock()
     mock_context = MagicMock()
     mock_context.args = ["AAPL"]
 
-    await bot.cmd_add(mock_update, mock_context)
+    await bot.cmd_addstock(mock_update, mock_context)
 
     mock_update.message.reply_text.assert_called_once()
     assert "already in" in mock_update.message.reply_text.call_args[0][0]
 
 
 @pytest.mark.asyncio
-async def test_cmd_add_no_args(bot):
-    """Test /add command without arguments."""
+async def test_cmd_addstock_no_args(bot):
+    """Test /addstock command without arguments."""
     mock_update = MagicMock()
     mock_update.message.reply_text = AsyncMock()
     mock_context = MagicMock()
     mock_context.args = []
 
-    await bot.cmd_add(mock_update, mock_context)
+    await bot.cmd_addstock(mock_update, mock_context)
 
     mock_update.message.reply_text.assert_called_once()
     assert "Usage:" in mock_update.message.reply_text.call_args[0][0]
 
 
 @pytest.mark.asyncio
-async def test_cmd_add_with_callback(temp_portfolio):
-    """Test /add command triggers callback."""
+async def test_cmd_addstock_with_callback(temp_portfolio):
+    """Test /addstock command triggers callback."""
     callback_called = []
 
     def on_add(ticker):
@@ -203,12 +205,15 @@ async def test_cmd_add_with_callback(temp_portfolio):
             bot_token="test_token", portfolio_path=temp_portfolio, on_add_stock=on_add
         )
 
+    # Mock the validation to return True (valid ticker)
+    bot._validate_ticker = AsyncMock(return_value=(True, []))
+
     mock_update = MagicMock()
     mock_update.message.reply_text = AsyncMock()
     mock_context = MagicMock()
     mock_context.args = ["TSLA"]
 
-    await bot.cmd_add(mock_update, mock_context)
+    await bot.cmd_addstock(mock_update, mock_context)
 
     assert "TSLA" in callback_called
 
@@ -223,9 +228,9 @@ async def test_cmd_remove_existing_stock(bot):
 
     await bot.cmd_remove(mock_update, mock_context)
 
-    stocks = bot._load_portfolio()
-    assert "AAPL" not in stocks
-    assert "MSFT" in stocks
+    portfolio = bot._load_portfolio()
+    assert "AAPL" not in portfolio["stocks"]
+    assert "MSFT" in portfolio["stocks"]
     mock_update.message.reply_text.assert_called_once()
     assert "Removed AAPL" in mock_update.message.reply_text.call_args[0][0]
 

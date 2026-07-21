@@ -10,7 +10,6 @@ Data flow:
 import json
 import logging
 import os
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -18,7 +17,6 @@ from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 
 from resources import (
-    FinvizScraper,
     NewsItem,
     SentimentClassifier,
     SentimentResult,
@@ -43,6 +41,7 @@ __all__ = [
     "save_news_cache",
     "filter_new_news",
     "get_user_timezone",
+    "validate_portfolio_tickers",
 ]
 
 
@@ -79,11 +78,12 @@ def setup_logging(level: str = "INFO") -> None:
     )
 
 
-def load_portfolio() -> list[str]:
-    """Load stock tickers from portfolio.json.
+def load_portfolio() -> dict[str, list[str]]:
+    """Load tickers from portfolio.json organized by asset type.
 
     Returns:
-        List of stock ticker symbols.
+        Dictionary mapping asset type to list of tickers.
+        E.g., {"stocks": ["AAPL", "MSFT"], "etf": ["INQQ"]}
 
     Raises:
         FileNotFoundError: If portfolio file does not exist.
@@ -93,26 +93,37 @@ def load_portfolio() -> list[str]:
     portfolio_path = Path(paths["portfolio"])
 
     if not portfolio_path.exists():
-        return []
+        return {"stocks": [], "etf": []}
 
     with open(portfolio_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    return data.get("stocks", [])
+    # Support both old format (list) and new format (dict with asset types)
+    if "stocks" in data or "etf" in data:
+        return {
+            "stocks": data.get("stocks", []),
+            "etf": data.get(
+                "etf", data.get("etfs", [])
+            ),  # Support both "etf" and "etfs"
+        }
+    else:
+        # Old format - assume all are stocks
+        return {"stocks": data.get("stocks", []), "etf": []}
 
 
-def save_portfolio(stocks: list[str]) -> None:
-    """Save stock tickers to portfolio.json.
+def save_portfolio(portfolio: dict[str, list[str]]) -> None:
+    """Save tickers to portfolio.json organized by asset type.
 
     Args:
-        stocks: List of stock ticker symbols.
+        portfolio: Dictionary mapping asset type to list of tickers.
+                  E.g., {"stocks": ["AAPL"], "etf": ["INQQ"]}
     """
     paths = load_paths()
     portfolio_path = Path(paths["portfolio"])
 
     data = {
-        "stocks": stocks,
-        "last_check": datetime.now().isoformat(),
+        "stocks": portfolio.get("stocks", []),
+        "etf": portfolio.get("etf", []),
     }
 
     with open(portfolio_path, "w", encoding="utf-8") as f:
@@ -164,71 +175,37 @@ def load_telegram_config() -> dict:
 
 
 def fetch_and_classify_news(
-    tickers: list[str], max_news_per_ticker: int = 10, relevance_threshold: float = 0.5
+    tickers: list[str] | dict[str, list[str]],
+    max_news_per_ticker: int = 10,
+    relevance_threshold: float = 0.5,
 ) -> list[tuple[NewsItem, SentimentResult]]:
-    """Fetch news for tickers from multiple sources and classify sentiment.
-
-    Uses parallel fetching with ThreadPoolExecutor for better performance.
+    """Fetch news for tickers from StockAnalysis and classify sentiment.
 
     Args:
-        tickers: List of stock ticker symbols.
-        max_news_per_ticker: Maximum news items to fetch per ticker per source.
+        tickers: Either a list of tickers (assumes stocks) or a dict mapping
+                asset type to list of tickers (e.g., {"stocks": ["AAPL"], "etf": ["INQQ"]}).
+        max_news_per_ticker: Maximum news items to fetch per ticker.
         relevance_threshold: Minimum confidence for positive/negative sentiment.
 
     Returns:
         List of (NewsItem, SentimentResult) tuples for relevant news only (today's news only).
-        News is fetched from Finviz and StockAnalysis in parallel.
+        News is fetched from StockAnalysis.
     """
     paths = load_paths()
     model_cache = Path(paths["model_cache"])
 
-    # Initialize scrapers and classifier
-    finviz_scraper = FinvizScraper()
+    # Initialize scraper and classifier
     stockanalysis_scraper = StockAnalysisScraper()
     classifier = SentimentClassifier(model_cache_dir=model_cache)
 
-    # Fetch news from both sources in parallel using threads
-    all_news = {}
-
-    def fetch_finviz():
-        """Fetch from Finviz (runs in thread)."""
-        try:
-            return finviz_scraper.fetch_multiple_tickers(
-                tickers, max_news_per_ticker=max_news_per_ticker
-            )
-        except Exception as e:
-            logger.warning(f"Failed to fetch from Finviz: {e}")
-            return {}
-
-    def fetch_stockanalysis():
-        """Fetch from StockAnalysis (runs in thread)."""
-        try:
-            return stockanalysis_scraper.fetch_multiple_tickers(
-                tickers, max_news_per_ticker=max_news_per_ticker
-            )
-        except Exception as e:
-            logger.warning(f"Failed to fetch from StockAnalysis: {e}")
-            return {}
-
-    # Execute both fetches in parallel
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        finviz_future = executor.submit(fetch_finviz)
-        stockanalysis_future = executor.submit(fetch_stockanalysis)
-
-        # Wait for results and merge
-        finviz_news = finviz_future.result()
-        sa_news = stockanalysis_future.result()
-
-    # Merge results from both sources
-    for ticker, news_items in finviz_news.items():
-        if ticker not in all_news:
-            all_news[ticker] = []
-        all_news[ticker].extend(news_items)
-
-    for ticker, news_items in sa_news.items():
-        if ticker not in all_news:
-            all_news[ticker] = []
-        all_news[ticker].extend(news_items)
+    # Fetch news from StockAnalysis
+    try:
+        all_news = stockanalysis_scraper.fetch_multiple_tickers(
+            tickers, max_news_per_ticker=max_news_per_ticker
+        )
+    except Exception as e:
+        logger.warning(f"Failed to fetch from StockAnalysis: {e}")
+        all_news = {}
 
     classified_news = []
     user_tz = get_user_timezone()
@@ -269,7 +246,6 @@ def setup_bot(
     portfolio_path: Path,
     bot_token: str,
     model_cache_dir: Path | None = None,
-    ticker_suggestions_path: Path | None = None,
 ) -> StockNewsBot:
     """Set up Telegram bot instance.
 
@@ -277,7 +253,6 @@ def setup_bot(
         portfolio_path: Path to portfolio.json file.
         bot_token: Telegram bot API token.
         model_cache_dir: Directory to cache ML models (optional).
-        ticker_suggestions_path: Path to ticker suggestions JSON (optional).
 
     Returns:
         Initialized StockNewsBot instance.
@@ -295,7 +270,6 @@ def setup_bot(
         on_add_stock=on_add_stock,
         on_remove_stock=on_remove_stock,
         model_cache_dir=model_cache_dir,
-        ticker_suggestions_path=ticker_suggestions_path,
     )
 
     return bot
@@ -375,3 +349,40 @@ def get_user_timezone() -> ZoneInfo:
     """
     timezone_str = os.getenv("USER_TIMEZONE", "Europe/Paris")
     return ZoneInfo(timezone_str)
+
+
+def validate_portfolio_tickers(
+    portfolio: dict[str, list[str]]
+) -> dict[str, dict[str, list[str]]]:
+    """Validate all tickers in portfolio by checking StockAnalysis pages.
+
+    Args:
+        portfolio: Dictionary with stocks and ETF lists.
+
+    Returns:
+        Dictionary with validation results:
+        {
+            "stocks": {"valid": [...], "invalid": [...]},
+            "etf": {"valid": [...], "invalid": [...]}
+        }
+    """
+    results = {"stocks": {"valid": [], "invalid": []}, "etf": {"valid": [], "invalid": []}}
+    scraper = StockAnalysisScraper(timeout=5)
+
+    # Validate stocks
+    for ticker in portfolio.get("stocks", []):
+        try:
+            scraper.fetch_news(ticker, max_news=1, asset_type="stocks")
+            results["stocks"]["valid"].append(ticker)
+        except Exception:
+            results["stocks"]["invalid"].append(ticker)
+
+    # Validate ETFs
+    for ticker in portfolio.get("etf", []):
+        try:
+            scraper.fetch_news(ticker, max_news=1, asset_type="etf")
+            results["etf"]["valid"].append(ticker)
+        except Exception:
+            results["etf"]["invalid"].append(ticker)
+
+    return results

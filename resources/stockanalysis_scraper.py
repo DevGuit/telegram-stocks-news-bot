@@ -4,12 +4,22 @@ Data flow:
   Stock ticker → HTTP request → StockAnalysis HTML → BeautifulSoup parsing → News list
 """
 
+from dataclasses import dataclass
 from datetime import datetime
 
 import requests
 from bs4 import BeautifulSoup
 
-from resources.finviz_scraper import NewsItem
+
+@dataclass
+class NewsItem:
+    """Single news item from a scraper."""
+
+    timestamp: datetime
+    headline: str
+    source: str
+    url: str
+    ticker: str
 
 
 class StockAnalysisScraper:
@@ -22,33 +32,41 @@ class StockAnalysisScraper:
             timeout: HTTP request timeout in seconds.
         """
         self.timeout = timeout
-        self.base_url = "https://stockanalysis.com/stocks"
+        self.base_url = "https://stockanalysis.com"
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/120.0.0.0 Safari/537.36"
         }
 
-    def fetch_news(self, ticker: str, max_news: int = 10) -> list[NewsItem]:
-        """Fetch latest news for a stock ticker.
+    def fetch_news(
+        self, ticker: str, max_news: int = 10, asset_type: str = "stocks"
+    ) -> list[NewsItem]:
+        """Fetch latest news for a ticker.
 
         Args:
-            ticker: Stock ticker symbol (e.g., "AAPL").
+            ticker: Ticker symbol (e.g., "AAPL" for stocks, "INQQ" for ETFs).
             max_news: Maximum number of news items to return.
+            asset_type: Asset type - "stocks" or "etf" (default: "stocks").
 
         Returns:
             List of NewsItem objects sorted by timestamp (newest first).
 
         Raises:
             requests.RequestException: If HTTP request fails.
-            ValueError: If ticker is invalid or page parsing fails.
+            ValueError: If ticker or asset_type is invalid.
         """
         if not ticker or not ticker.strip():
             raise ValueError("Ticker cannot be empty")
 
+        if asset_type not in ["stocks", "etf"]:
+            raise ValueError(
+                f"Invalid asset_type: {asset_type}. Must be 'stocks' or 'etf'."
+            )
+
         ticker = ticker.strip().lower()  # StockAnalysis uses lowercase URLs
 
-        url = f"{self.base_url}/{ticker}/"
+        url = f"{self.base_url}/{asset_type}/{ticker}/"
         response = requests.get(url, headers=self.headers, timeout=self.timeout)
         response.raise_for_status()
 
@@ -56,16 +74,29 @@ class StockAnalysisScraper:
 
         news_items = []
 
-        # StockAnalysis has news in specific sections
-        news_section = soup.find("div", {"id": "news"}) or soup.find(
-            "section", class_="news"
-        )
+        # Find the "News" heading (H2 tag with "News" text)
+        news_heading = soup.find("h2", string=lambda t: t and "news" in t.lower())
 
-        if not news_section:
-            # Try finding news items directly
-            news_links = soup.find_all("a", class_="news-link")
-        else:
-            news_links = news_section.find_all("a")
+        news_links = []
+        if news_heading:
+            # Get the parent container and find all news links
+            # News links have /news/ in href and point to external sources
+            container = news_heading.parent
+            for _ in range(5):  # Go up parent levels to find the container
+                if container:
+                    links = container.find_all(
+                        "a", href=lambda h: h and "/news/" in h and h.startswith("http")
+                    )
+                    if links:
+                        news_links = links
+                        break
+                    container = container.parent
+
+        # Fallback: search entire page for news links if heading not found
+        if not news_links:
+            news_links = soup.find_all(
+                "a", href=lambda h: h and "/news/" in h and h.startswith("http")
+            )
 
         for link in news_links[:max_news]:
             try:
@@ -98,8 +129,19 @@ class StockAnalysisScraper:
                             except Exception:
                                 pass
 
-                # Source from StockAnalysis
+                # Extract source from URL domain
                 source = "StockAnalysis"
+                if url_full.startswith("http"):
+                    try:
+                        from urllib.parse import urlparse
+
+                        domain = urlparse(url_full).netloc
+                        # Remove 'www.' prefix and get main domain name
+                        domain = domain.replace("www.", "")
+                        # Capitalize first letter
+                        source = domain.split(".")[0].capitalize()
+                    except Exception:
+                        source = "StockAnalysis"
 
                 news_items.append(
                     NewsItem(
@@ -116,12 +158,15 @@ class StockAnalysisScraper:
         return news_items
 
     def fetch_multiple_tickers(
-        self, tickers: list[str], max_news_per_ticker: int = 10
+        self,
+        tickers: list[str] | dict[str, list[str]],
+        max_news_per_ticker: int = 10,
     ) -> dict[str, list[NewsItem]]:
         """Fetch news for multiple tickers.
 
         Args:
-            tickers: List of stock ticker symbols.
+            tickers: Either a list of tickers (defaults to "stocks") or a dict
+                    mapping asset_type to list of tickers (e.g., {"stocks": ["AAPL"], "etf": ["INQQ"]}).
             max_news_per_ticker: Maximum news items per ticker.
 
         Returns:
@@ -129,12 +174,21 @@ class StockAnalysisScraper:
         """
         results = {}
 
-        for ticker in tickers:
-            try:
-                news = self.fetch_news(ticker, max_news=max_news_per_ticker)
-                results[ticker.upper()] = news
-            except Exception:
-                results[ticker.upper()] = []
+        # If list provided, assume all are stocks for backward compatibility
+        if isinstance(tickers, list):
+            tickers_dict = {"stocks": tickers}
+        else:
+            tickers_dict = tickers
+
+        for asset_type, ticker_list in tickers_dict.items():
+            for ticker in ticker_list:
+                try:
+                    news = self.fetch_news(
+                        ticker, max_news=max_news_per_ticker, asset_type=asset_type
+                    )
+                    results[ticker.upper()] = news
+                except Exception:
+                    results[ticker.upper()] = []
 
         return results
 
@@ -143,12 +197,23 @@ if __name__ == "__main__":
     """Example usage of StockAnalysisScraper."""
     scraper = StockAnalysisScraper()
 
-    print("Fetching news for MSFT from StockAnalysis...")
-    news = scraper.fetch_news("MSFT", max_news=5)
+    print("Fetching news for MSFT (stock) from StockAnalysis...")
+    stock_news = scraper.fetch_news("MSFT", max_news=3, asset_type="stocks")
 
-    for item in news:
+    for item in stock_news:
         print(f"\n[{item.timestamp}] {item.source}")
         print(f"{item.headline}")
         print(f"{item.url}")
 
-    print(f"\n\nFetched {len(news)} news items for MSFT")
+    print(f"\n\nFetched {len(stock_news)} news items for MSFT")
+
+    print("\n\n" + "=" * 60)
+    print("Fetching news for INQQ (ETF) from StockAnalysis...")
+    etf_news = scraper.fetch_news("INQQ", max_news=3, asset_type="etf")
+
+    for item in etf_news:
+        print(f"\n[{item.timestamp}] {item.source}")
+        print(f"{item.headline}")
+        print(f"{item.url}")
+
+    print(f"\n\nFetched {len(etf_news)} news items for INQQ")
